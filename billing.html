@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบคำนวณค่าใช้จ่าย (Smart Billing)</title>
+    <style>
+        :root {
+            --primary: #3b82f6; --success: #10b981; --danger: #ef4444; 
+            --dark: #1e293b; --light: #f1f5f9; --warning: #f59e0b; 
+            --teal: #0ea5e9; --purple: #8b5cf6; --bg: #f8fafc; --card: #ffffff;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg); margin: 0; padding: 20px; color: var(--dark); }
+        .container { max-width: 1000px; margin: 0 auto; }
+        
+        .top-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 30px; gap: 15px; }
+        .btn-back { background-color: var(--dark); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 14px; text-decoration: none; display: inline-flex; align-items: center; transition: 0.2s; }
+        .btn-back:hover { background-color: #334155; }
+        .header-title { margin: 0; color: var(--dark); flex: 1; text-align: center; font-size: 24px; font-weight: bold;}
+        .spacer { width: 120px; }
+        @media (max-width: 600px) { .top-header { flex-direction: column; text-align: center; } .spacer { display: none; } }
+
+        .card { background: var(--card); padding: 25px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.02); margin-bottom: 20px; border: 1px solid #e2e8f0; }
+        
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+        
+        .card-title { font-size: 16px; font-weight: bold; margin-top: 0; margin-bottom: 18px; display: flex; align-items: center; gap: 8px; color: var(--dark); }
+        
+        .form-group { margin-bottom: 15px; }
+        .form-row { display: flex; gap: 15px; }
+        .form-row .form-group { flex: 1; }
+        
+        label { display: block; font-weight: bold; margin-bottom: 6px; font-size: 13px; color: #475569; }
+        input, select { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; box-sizing: border-box; font-size: 14px; color: var(--dark); outline: none; }
+        input:focus, select:focus { border-color: var(--primary); background: #fff; }
+        
+        .btn { background-color: var(--primary); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: bold; width: 100%; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn:active { transform: scale(0.99); }
+        .btn-sm { padding: 6px 12px; font-size: 13px; width: auto; }
+        .btn-danger { background-color: var(--danger); }
+        .btn-success { background-color: var(--success); }
+        
+        .alert-box { background: #fef3c7; color: #92400e; padding: 12px 15px; border-radius: 8px; margin-top: 15px; font-size: 13px; line-height: 1.5; border-left: 4px solid var(--warning); }
+        .info-note { font-size: 12px; color: #64748b; margin-top: -10px; margin-bottom: 15px; display: block; }
+
+        .player-list { display: flex; flex-direction: column; gap: 10px; }
+        .player-row { display: flex; align-items: center; gap: 12px; background: var(--bg); padding: 12px; border-radius: 10px; border: 1px solid #e2e8f0; }
+        .player-no { font-weight: bold; color: #64748b; min-width: 20px; text-align: center; }
+        .player-name-input { flex: 2; }
+        .player-time-box { flex: 2; display: flex; flex-direction: column; gap: 6px; }
+        .time-inner-row { display: flex; align-items: center; gap: 5px; }
+        .time-inner-row label { width: 50px; margin: 0; font-size: 12px; white-space: nowrap; color: #64748b; }
+        .time-inner-row input { padding: 6px 8px; font-size: 13px; }
+        .calc-badge { flex: 1.5; background: #e0f2fe; color: #0369a1; padding: 10px; border-radius: 8px; font-size: 13px; text-align: center; border: 1px dashed #0284c7; display: flex; flex-direction: column; justify-content: center; line-height: 1.4; }
+        .btn-del { background: var(--danger); color: white; border: none; padding: 10px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 13px; height: 100%; }
+        @media (max-width: 768px) { .player-row { flex-direction: column; align-items: stretch; gap: 10px; } .time-inner-row label { width: 60px; } .calc-badge { padding: 12px; } }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; background: white; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px; text-align: center; border-bottom: 1px solid #e2e8f0; }
+        th { background-color: var(--dark); color: white; font-weight: 600; }
+        tr:last-child td { border-bottom: none; }
+        .text-left { text-align: left; }
+        .text-right { text-align: right; }
+        .total-row { background-color: #f8fafc; font-weight: bold; font-size: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="top-header">
+        <button class="btn-back" onclick="window.history.back()">⬅️ กลับหน้าจัดคิว</button>
+        <h2 class="header-title">💸 ระบบคำนวณค่าใช้จ่าย (Smart Billing)</h2>
+        <div class="spacer"></div>
+    </div>
+    
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">🏸 ข้อมูลสนาม (Court Setup)</div>
+            <div class="form-group">
+                <label>เลือกสนาม:</label>
+                <div style="display: flex; gap: 10px;">
+                    <select id="courtSelect" onchange="handleCourtPreset()">
+                        <option value="150">คอร์ท A (150 บาท/ชม.)</option>
+                        <option value="160">คอร์ท B (160 บาท/ชม.)</option>
+                        <option value="custom">กำหนดราคาเอง</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>ราคาต่อชั่วโมง (บาท):</label>
+                <input type="number" id="pricePerHour" value="150" oninput="updateAllRows()">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>เวลาเริ่มเล่น (เปิดคอร์ท):</label>
+                    <input type="time" id="courtStartTime" value="09:00" onchange="updateAllRows()">
+                </div>
+                <div class="form-group">
+                    <label>จำนวนชั่วโมงที่จอง:</label>
+                    <input type="number" id="courtHours" value="2" min="1" oninput="updateAllRows()">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">🫨 ข้อมูลลูกแบด (Shuttlecock)</div>
+            <div class="form-group">
+                <label>จำนวนลูกที่ใช้ไป (ลูก):</label>
+                <input type="number" id="shuttleCount" value="0" min="0">
+            </div>
+            <div class="form-group">
+                <label>ราคาต่อลูก (บาท):</label>
+                <input type="number" id="shuttlePrice" value="65" min="0">
+            </div>
+            <div class="alert-box">
+                💡 <strong>ตรรกะการคิดเงิน:</strong><br>
+                ระบบจะแบ่งค่าสนามเป็นรายชั่วโมง ใครที่อยู่ในช่วงชั่วโมงไหนก็จะหารค่าสนามเฉพาะชั่วโมงนั้นเท่านั้น (แฟร์ที่สุดสำหรับคนที่มาทีหลังหรือกลับก่อน) ส่วนค่าลูกแบดจะถูกนำมา "หารเท่ากันทุกคน"
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <div class="card-title" style="margin: 0;">⏰ บันทึกช่วงเวลาของผู้เล่น (Arrival & Leave)</div>
+            <button class="btn btn-sm btn-success" onclick="addPlayerRow()">+ เพิ่มผู้เล่น</button>
+        </div>
+        <span class="info-note">* หากไม่ได้ตั้งเวลากลับ ระบบจะถือว่าเล่นจนจบชั่วโมงที่จองไว้</span>
+        
+        <div id="playersContainer" class="player-list"></div>
+
+        <button class="btn btn-success" style="margin-top: 25px; background-color: #3b82f6;" onclick="calculateTotalBilling()">🧮 คำนวณค่าใช้จ่ายทั้งหมด</button>
+    </div>
+
+    <div class="card" id="resultCard" style="display: none;">
+        <div class="card-title" style="color: var(--success);">📊 สรุปผลยอดเรียกเก็บรวมยอดรายบุคคล</div>
+        <div id="resultTableContainer"></div>
+    </div>
+</div>
+
+<script>
+    let playerCount = 0;
+
+    function getCourtEndTimeStr() {
+        const startStr = document.getElementById('courtStartTime').value || "09:00";
+        const hours = parseInt(document.getElementById('courtHours').value) || 2;
+        let [h, m] = startStr.split(':').map(Number);
+        h = (h + hours) % 24;
+        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        let savedStartTime = localStorage.getItem("badminton_billing_start_time");
+        let startTimeInput = document.getElementById('courtStartTime');
+        if (savedStartTime) startTimeInput.value = savedStartTime;
+        
+        let savedPlayers = localStorage.getItem("badminton_billing_players");
+        let container = document.getElementById('playersContainer');
+        let currentStartTime = startTimeInput.value;
+        let defaultEndTime = getCourtEndTimeStr();
+
+        if (savedPlayers) {
+            let parsedPlayers = JSON.parse(savedPlayers);
+            if (parsedPlayers.length > 0) {
+                parsedPlayers.forEach(playerData => {
+                    playerCount++;
+                    
+                    let pName = typeof playerData === 'object' ? playerData.name : playerData;
+                    let pArrival = (typeof playerData === 'object' && playerData.joinTime) ? playerData.joinTime : currentStartTime;
+                    
+                    let div = document.createElement('div');
+                    div.className = 'player-row';
+                    div.id = `playerRow_${playerCount}`;
+                    div.innerHTML = `
+                        <div class="player-no">${playerCount}</div>
+                        <input type="text" class="player-name-input" placeholder="ชื่อผู้เล่นคนที่ ${playerCount}" value="${pName}">
+                        <div class="player-time-box">
+                            <div class="time-inner-row">
+                                <label>🟢 มาถึง:</label>
+                                <input type="time" class="player-arrival-time" value="${pArrival}" onchange="updateRowBillTime(${playerCount})">
+                            </div>
+                            <div class="time-inner-row">
+                                <label>🔴 กลับ:</label>
+                                <input type="time" class="player-leave-time" value="${defaultEndTime}" onchange="updateRowBillTime(${playerCount})">
+                            </div>
+                        </div>
+                        <div class="calc-badge" id="billStartBadge_${playerCount}">กำลังคำนวณ...</div>
+                        <button class="btn-del" onclick="removePlayerRow(${playerCount})">ลบ</button>
+                    `;
+                    container.appendChild(div);
+                    updateRowBillTime(playerCount);
+                });
+                return; 
+            }
+        }
+        
+        for(let i=0; i<6; i++) addPlayerRow();
+    });
+
+    function handleCourtPreset() {
+        const select = document.getElementById('courtSelect');
+        const priceInput = document.getElementById('pricePerHour');
+        if (select.value !== 'custom') {
+            priceInput.value = select.value;
+        }
+        updateAllRows();
+    }
+
+    function addPlayerRow() {
+        playerCount++;
+        const container = document.getElementById('playersContainer');
+        
+        let now = new Date();
+        let hours = String(now.getHours()).padStart(2, '0');
+        let minutes = String(now.getMinutes()).padStart(2, '0');
+        let realTimeNow = `${hours}:${minutes}`;
+        let defaultEndTime = getCourtEndTimeStr();
+        
+        const row = document.createElement('div');
+        row.className = 'player-row';
+        row.id = `playerRow_${playerCount}`;
+        row.innerHTML = `
+            <div class="player-no">${playerCount}</div>
+            <input type="text" class="player-name-input" placeholder="ชื่อผู้เล่นคนที่ ${playerCount}" value="">
+            <div class="player-time-box">
+                <div class="time-inner-row">
+                    <label>🟢 มาถึง:</label>
+                    <input type="time" class="player-arrival-time" value="${realTimeNow}" onchange="updateRowBillTime(${playerCount})">
+                </div>
+                <div class="time-inner-row">
+                    <label>🔴 กลับ:</label>
+                    <input type="time" class="player-leave-time" value="${defaultEndTime}" onchange="updateRowBillTime(${playerCount})">
+                </div>
+            </div>
+            <div class="calc-badge" id="billStartBadge_${playerCount}">กำลังคำนวณ...</div>
+            <button class="btn-del" onclick="removePlayerRow(${playerCount})">ลบ</button>
+        `;
+        container.appendChild(row);
+        updateRowBillTime(playerCount);
+    }
+
+    function removePlayerRow(id) {
+        const row = document.getElementById(`playerRow_${id}`);
+        if (row) {
+            row.remove();
+            reIndexPlayers();
+        }
+    }
+
+    function reIndexPlayers() {
+        const rows = document.querySelectorAll('#playersContainer .player-row');
+        playerCount = 0;
+        rows.forEach((row, index) => {
+            playerCount++;
+            row.id = `playerRow_${playerCount}`;
+            row.querySelector('.player-no').innerText = playerCount;
+            row.querySelector('.player-arrival-time').setAttribute('onchange', `updateRowBillTime(${playerCount})`);
+            row.querySelector('.player-leave-time').setAttribute('onchange', `updateRowBillTime(${playerCount})`);
+            row.querySelector('.calc-badge').id = `billStartBadge_${playerCount}`;
+            row.querySelector('.btn-del').setAttribute('onclick', `removePlayerRow(${playerCount})`);
+        });
+    }
+
+    function updateRowBillTime(id) {
+        const courtStartStr = document.getElementById('courtStartTime').value;
+        const totalHours = parseInt(document.getElementById('courtHours').value) || 1;
+        const row = document.getElementById(`playerRow_${id}`);
+        if (!row) return;
+        
+        const arrivalStr = row.querySelector('.player-arrival-time').value;
+        const leaveStr = row.querySelector('.player-leave-time').value;
+        
+        if(!arrivalStr || !leaveStr) return;
+
+        let [cHour, cMin] = courtStartStr.split(':').map(Number);
+        let [aHour, aMin] = arrivalStr.split(':').map(Number);
+        let [lHour, lMin] = leaveStr.split(':').map(Number);
+        
+        let courtStartMins = cHour * 60 + cMin;
+        let arrivalMins = aHour * 60 + aMin;
+        let leaveMins = lHour * 60 + lMin;
+        
+        if (arrivalMins < courtStartMins - 120) arrivalMins += 24 * 60; 
+        if (leaveMins < arrivalMins) leaveMins += 24 * 60;
+
+        let diffStart = arrivalMins - courtStartMins;
+        if (diffStart < 0) diffStart = 0; 
+        
+        let startHourIndex = 0;
+        if (diffStart > 40) {
+            startHourIndex = Math.floor((diffStart - 41) / 60) + 1;
+        }
+        
+        let diffEnd = leaveMins - courtStartMins;
+        let endHourIndex = Math.ceil((diffEnd - 20) / 60);
+
+        if (endHourIndex <= startHourIndex) endHourIndex = startHourIndex + 1; 
+        if (endHourIndex > totalHours) endHourIndex = totalHours; 
+        if (startHourIndex >= totalHours) {
+            startHourIndex = totalHours; 
+            endHourIndex = totalHours; 
+        }
+
+        let startMinsCalc = courtStartMins + (startHourIndex * 60);
+        let endMinsCalc = courtStartMins + (endHourIndex * 60);
+        
+        let formatTime = (mins) => `${(Math.floor(mins/60)%24).toString().padStart(2,'0')}:${(mins%60).toString().padStart(2,'0')}`;
+        
+        const badge = document.getElementById(`billStartBadge_${id}`);
+        
+        if (startHourIndex === endHourIndex) {
+            badge.innerHTML = `<span style="color:var(--danger); font-weight:bold;">ไม่ได้ร่วมเล่น</span>`;
+            badge.setAttribute('data-start', 0);
+            badge.setAttribute('data-end', 0);
+        } else {
+            let playedHrs = endHourIndex - startHourIndex;
+            badge.innerHTML = `คิดค่าสนาม: <strong>${playedHrs}</strong> ชม.<br><span style="font-size:11px; color:#0284c7;">(${formatTime(startMinsCalc)} - ${formatTime(endMinsCalc)})</span>`;
+            badge.setAttribute('data-start', startHourIndex);
+            badge.setAttribute('data-end', endHourIndex);
+        }
+    }
+
+    function updateAllRows() {
+        // [แก้ไข] อัปเดตเวลาเลิกเล่นของทุกคนให้ตรงกับชั่วโมงที่จองไว้ใหม่
+        const defaultEndTime = getCourtEndTimeStr();
+        const rows = document.querySelectorAll('#playersContainer .player-row');
+        
+        rows.forEach(row => {
+            const leaveInput = row.querySelector('.player-leave-time');
+            leaveInput.value = defaultEndTime; // บังคับเปลี่ยนค่า input
+            
+            const id = row.id.split('_')[1];
+            updateRowBillTime(id);
+        });
+    }
+
+    function calculateTotalBilling() {
+        const rows = document.querySelectorAll('#playersContainer .player-row');
+        if (rows.length === 0) {
+            alert('กรุณาเพิ่มผู้เล่นอย่างน้อย 1 คนครับ');
+            return;
+        }
+
+        const pricePerHour = parseFloat(document.getElementById('pricePerHour').value) || 0;
+        const totalHours = parseInt(document.getElementById('courtHours').value) || 1;
+        const shuttleCount = parseInt(document.getElementById('shuttleCount').value) || 0;
+        const shuttlePrice = parseFloat(document.getElementById('shuttlePrice').value) || 0;
+        
+        const totalShuttleCost = shuttleCount * shuttlePrice;
+        
+        let participants = [];
+        rows.forEach(row => {
+            const id = row.id.split('_')[1];
+            const name = row.querySelector('.player-name-input').value.trim() || `ผู้เล่น ${id}`;
+            const badge = document.getElementById(`billStartBadge_${id}`);
+            const startIdx = parseInt(badge.getAttribute('data-start')) || 0;
+            const endIdx = parseInt(badge.getAttribute('data-end')) || 0;
+            
+            if (endIdx > startIdx) {
+                participants.push({
+                    id: id,
+                    name: name,
+                    startHourIndex: startIdx,
+                    endHourIndex: endIdx,
+                    courtFee: 0,
+                    shuttleFee: 0,
+                    playedHoursCount: endIdx - startIdx
+                });
+            }
+        });
+
+        if(participants.length === 0) return alert('ต้องมีผู้เล่นที่คิดเงินได้อย่างน้อย 1 คนครับ');
+
+        const shuttleCostPerPerson = totalShuttleCost / participants.length;
+        participants.forEach(p => p.shuttleFee = shuttleCostPerPerson);
+
+        for (let h = 0; h < totalHours; h++) {
+            let activePlayersInHour = participants.filter(p => p.startHourIndex <= h && h < p.endHourIndex);
+            
+            if (activePlayersInHour.length > 0) {
+                let costPerPersonForThisHour = pricePerHour / activePlayersInHour.length;
+                activePlayersInHour.forEach(p => {
+                    p.courtFee += costPerPersonForThisHour;
+                });
+            }
+        }
+
+        let html = `
+            <table>
+                <thead>
+                    <tr>
+                        <th class="text-left">รายชื่อผู้เล่น</th>
+                        <th>ระยะเวลาที่แชร์บิล</th>
+                        <th class="text-right">ค่าสนาม (บาท)</th>
+                        <th class="text-right">ค่าลูกแบด (บาท)</th>
+                        <th class="text-right" style="background:#2563eb;">ยอดต้องชำระสุทธิ</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        let grandCourtCalculated = 0;
+        let grandShuttleCalculated = 0;
+        let grandTotalNet = 0;
+
+        participants.forEach(p => {
+            let totalNet = p.courtFee + p.shuttleFee;
+            grandCourtCalculated += p.courtFee;
+            grandShuttleCalculated += p.shuttleFee;
+            grandTotalNet += totalNet;
+
+            html += `
+                <tr>
+                    <td class="text-left" style="font-weight:bold;">${p.name}</td>
+                    <td><span style="background:#f1f5f9; padding:4px 10px; border-radius:6px; font-weight:bold; color:#0369a1;">${p.playedHoursCount} ชม.</span></td>
+                    <td class="text-right">${p.courtFee.toFixed(2)}</td>
+                    <td class="text-right">${p.shuttleFee.toFixed(2)}</td>
+                    <td class="text-right" style="font-weight:900; color:#1d4ed8; font-size:15px; background:#f0fdf4;">${totalNet.toFixed(2)}</td>
+                </tr>
+            `;
+        });
+
+        html += `
+                <tr class="total-row">
+                    <td colspan="2" class="text-left" style="padding-left:15px;">💰 ยอดรวมทั้งบิล (Grand Total)</td>
+                    <td class="text-right" style="color:#475569;">${grandCourtCalculated.toFixed(2)}</td>
+                    <td class="text-right" style="color:#475569;">${grandShuttleCalculated.toFixed(2)}</td>
+                    <td class="text-right" style="color:var(--success); font-size:16px; background:#dcfce7;">${grandTotalNet.toFixed(2)} บาท</td>
+                </tr>
+                </tbody>
+            </table>
+        `;
+
+        document.getElementById('resultTableContainer').innerHTML = html;
+        document.getElementById('resultCard').style.display = 'block';
+        document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth' });
+    }
+</script>
+
+</body>
+</html>
