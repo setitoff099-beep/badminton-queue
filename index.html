@@ -46,7 +46,7 @@
         .champ-badge { display: inline-block; background: var(--warning); color: white; font-size: 12px; font-weight: bold; padding: 4px 10px; border-radius: 12px; margin-top: 5px; }
         .btn-minus { background-color: #cbd5e1; color: #475569; padding: 8px 0; font-size: 14px; width: 80%; border-radius: 8px; margin-top: 15px; font-weight: bold; }
 
-        .court-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+        .court-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; flex-wrap: wrap; gap: 10px;}
         .btn-repair { background: #e0f2fe; color: #0369a1; border: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: bold; width: auto; margin: 0; }
         
         .grid-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 30px; }
@@ -345,7 +345,6 @@
         saveData(); 
 
         let currentPage = window.location.pathname.split("/").pop();
-        
         if (newMaxChamps === 1 && (currentPage === "index.html" || currentPage === "")) {
             sessionStorage.setItem('midgame_transfer_state', createDeepSnapshot());
             window.location.href = 'index2.html';
@@ -358,48 +357,47 @@
     }
 
     function startTournament() {
-            const text = document.getElementById('playerInput').value.trim();
-            if(!text) { alert('กรุณากรอกชื่อผู้เล่นครับ'); return; }
-            
-            let rawPlayers = text.split('\n').map(p => p.trim()).filter(p => p !== "");
-            players = [...new Set(rawPlayers)]; 
-            
-            numCourts = parseInt(document.getElementById('numCourtsSetting').value) || 1;
-            let requiredPlayers = numCourts * 4;
-            
-            if(players.length < requiredPlayers) { 
-                alert(`ถ้าเปิด ${numCourts} สนาม ต้องมีผู้เล่นเริ่มต้นอย่างน้อย ${requiredPlayers} คนครับ`); 
-                return; 
-            }
-
-            winScore = parseInt(document.getElementById('winScore').value) || 21;
-            maxChamps = parseInt(document.getElementById('maxChamps').value) || 2;
-
-            if (maxChamps === 1) {
-                sessionStorage.setItem('setup_players', text);
-                sessionStorage.setItem('setup_courts', document.getElementById('numCourtsSetting').value);
-                sessionStorage.setItem('setup_winScore', document.getElementById('winScore').value);
-                window.location.href = 'index2.html';
-                return; 
-            }
-            
-            const now = new Date();
-            const h = String(now.getHours()).padStart(2, '0');
-            const m = String(now.getMinutes()).padStart(2, '0');
-            startTimeExact = `${h}:${m}`;
-            
-            const calcM = now.getMinutes() >= 30 ? '30' : '00';
-            startTimeCalculated = `${h}:${calcM}`;
-            
-            initFreshData();
-            mainQueue = [...players].sort(() => 0.5 - Math.random());
-            
-            document.getElementById('setupSection').classList.remove('active');
-            document.getElementById('gameSection').classList.add('active');
-            
-            setupAllCourts();
-            saveData(); 
+        const text = document.getElementById('playerInput').value.trim();
+        if(!text) { alert('กรุณากรอกชื่อผู้เล่นครับ'); return; }
+        
+        let rawPlayers = text.split('\n').map(p => p.trim()).filter(p => p !== "");
+        players = [...new Set(rawPlayers)]; 
+        
+        numCourts = parseInt(document.getElementById('numCourtsSetting').value) || 1;
+        let requiredPlayers = numCourts * 4;
+        
+        if(players.length < requiredPlayers) { 
+            if(!confirm(`ถ้าเปิด ${numCourts} สนาม ปกติควรมีผู้เล่นเริ่มต้นอย่างน้อย ${requiredPlayers} คน แต่ถ้าคุณต้องการเล่น "ประเภทเดี่ยว (1v1)" คุณสามารถกดยืนยันเพื่อเริ่มได้เลยครับ ยืนยันหรือไม่?`)) return;
         }
+
+        winScore = parseInt(document.getElementById('winScore').value) || 21;
+        maxChamps = parseInt(document.getElementById('maxChamps').value) || 2;
+
+        if (maxChamps === 1) {
+            sessionStorage.setItem('setup_players', text);
+            sessionStorage.setItem('setup_courts', document.getElementById('numCourtsSetting').value);
+            sessionStorage.setItem('setup_winScore', document.getElementById('winScore').value);
+            window.location.href = 'index2.html';
+            return; 
+        }
+        
+        const now = new Date();
+        const h = String(now.getHours()).padStart(2, '0');
+        const m = String(now.getMinutes()).padStart(2, '0');
+        startTimeExact = `${h}:${m}`;
+        
+        const calcM = now.getMinutes() >= 30 ? '30' : '00';
+        startTimeCalculated = `${h}:${calcM}`;
+        
+        initFreshData();
+        mainQueue = [...players].sort(() => 0.5 - Math.random());
+        
+        document.getElementById('setupSection').classList.remove('active');
+        document.getElementById('gameSection').classList.add('active');
+        
+        setupAllCourts();
+        saveData(); 
+    }
 
     function initFreshData() {
         eliminatedOrder = []; matchHistory = []; courts = [];
@@ -416,7 +414,7 @@
 
         for(let i = 0; i < numCourts; i++) {
             courts.push({
-                id: i, name: `Court ${i+1}`,
+                id: i, name: `Court ${i+1}`, matchType: 'doubles', // ค่าเริ่มต้นคือตีคู่
                 teamA: null, teamB: null, scoreA: 0, scoreB: 0,
                 isGameOver: false, matchRound: 1, currentChamp: null, stateBeforeFinishStr: null, nextMatchData: null
             });
@@ -435,14 +433,20 @@
         eliminatedOrder = eliminatedOrder.filter(p => p !== playerName);
     }
 
-    function selectTeam(excludeList) {
+    // แก้ไขให้รับพารามิเตอร์ reqCount (1 = เดี่ยว, 2 = คู่)
+    function selectTeam(excludeList, reqCount = 2) {
         let rawPool = getAvailablePlayers(excludeList);
         let pool = rawPool;
 
         let restedPool = rawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime !== globalMatchCounter);
         
-        if (restedPool.length >= 2 || (restedPool.length === 1 && rawPool.length === 1)) {
+        if (restedPool.length >= reqCount || (restedPool.length === 1 && rawPool.length === 1)) {
             pool = restedPool;
+        }
+
+        // กรณีตีเดี่ยว (1v1) ดึงแค่ 1 คน
+        if (reqCount === 1) {
+            return pool.length > 0 ? pool.slice(0, 1) : rawPool.slice(0, 1);
         }
 
         if (pool.length < 2) return rawPool.slice(0, 2); 
@@ -533,18 +537,63 @@
 
     function setupAllCourts() {
         courts.forEach((court) => {
-            let teamA = selectTeam([]);
-            let teamB = selectTeam([teamA[0], teamA[1]]);
-            pullPlayer(teamA[0]); pullPlayer(teamA[1]);
-            pullPlayer(teamB[0]); pullPlayer(teamB[1]);
+            let req = (court.matchType === 'singles') ? 1 : 2;
+            let teamA = selectTeam([], req);
+            let teamB = selectTeam([...teamA], req);
             
-            let optimized = optimizeFourPlayers([teamA[0], teamA[1], teamB[0], teamB[1]]);
+            teamA.forEach(p => pullPlayer(p));
+            teamB.forEach(p => pullPlayer(p));
             
-            court.teamA = { p1: optimized.teamA[0], p2: optimized.teamA[1] };
-            court.teamB = { p1: optimized.teamB[0], p2: optimized.teamB[1] };
+            if (req === 1) {
+                court.teamA = { p1: teamA[0] };
+                court.teamB = { p1: teamB[0] };
+            } else {
+                let optimized = optimizeFourPlayers([...teamA, ...teamB]);
+                court.teamA = { p1: optimized.teamA[0], p2: optimized.teamA[1] };
+                court.teamB = { p1: optimized.teamB[0], p2: optimized.teamB[1] };
+            }
             recordPartnerships(court.teamA, court.teamB);
         });
         renderAll();
+    }
+
+    // ฟังก์ชันใหม่: สลับประเภทการเล่น (คู่/เดี่ยว) ของแต่ละสนาม
+    window.changeCourtMode = function(courtIndex, mode) {
+        let court = courts[courtIndex];
+        if ((court.matchType || 'doubles') === mode) return;
+
+        if (court.scoreA > 0 || court.scoreB > 0 || court.isGameOver) {
+            if(!confirm(`คอร์ท ${court.name} มีการแข่งขันค้างอยู่ ยืนยันเปลี่ยนประเภทการเล่นหรือไม่? (ระบบจะล้างคะแนนและดึงคนจัดใหม่ทั้งหมด)`)) {
+                renderAll(); return;
+            }
+        }
+
+        undoPartnerships(court.teamA, court.teamB);
+        
+        // ดึงคนที่อยู่บนคอร์ท กลับไปเข้าคิวที่หัวแถวใหม่
+        let onCourt = [];
+        if (court.teamA) {
+            if (court.teamA.p1) onCourt.push(court.teamA.p1);
+            if (court.teamA.p2) onCourt.push(court.teamA.p2);
+        }
+        if (court.teamB) {
+            if (court.teamB.p1) onCourt.push(court.teamB.p1);
+            if (court.teamB.p2) onCourt.push(court.teamB.p2);
+        }
+        
+        onCourt.reverse().forEach(p => { 
+            if(!eliminatedOrder.includes(p) && !mainQueue.includes(p)) eliminatedOrder.unshift(p); 
+        });
+
+        court.matchType = mode;
+        court.currentChamp = null; // เปลี่ยนโหมด ล้างแชมป์ทิ้ง
+        court.isGameOver = false;
+        court.teamA = null;
+        court.teamB = null;
+        court.scoreA = 0;
+        court.scoreB = 0;
+
+        rePairCourtMatch(courtIndex, true);
     }
 
     function addScore(courtIndex, team) {
@@ -579,36 +628,48 @@
     function finishMatch(courtIndex, winnerTeam) {
         let court = courts[courtIndex];
         court.isGameOver = true;
+        let req = (court.matchType === 'singles') ? 1 : 2;
         
         let winner = winnerTeam === 'A' ? court.teamA : court.teamB;
         let loser = winnerTeam === 'A' ? court.teamB : court.teamA;
 
         globalMatchCounter++;
-        [loser.p1, loser.p2].forEach(p => { if (playerStats[p]) playerStats[p].lastBenchTime = globalMatchCounter; });
+        
+        let loserArr = req === 1 ? [loser.p1] : [loser.p1, loser.p2];
+        let winnerArr = req === 1 ? [winner.p1] : [winner.p1, winner.p2];
 
-        pushToEliminated(loser.p1); pushToEliminated(loser.p2);
+        loserArr.forEach(p => { if (playerStats[p]) playerStats[p].lastBenchTime = globalMatchCounter; pushToEliminated(p); });
 
-        [winner.p1, winner.p2, loser.p1, loser.p2].forEach(p => playerStats[p].played++);
-        [winner.p1, winner.p2].forEach(p => playerStats[p].wins++);
-        [loser.p1, loser.p2].forEach(p => playerStats[p].losses++);
+        [...winnerArr, ...loserArr].forEach(p => playerStats[p].played++);
+        winnerArr.forEach(p => playerStats[p].wins++);
+        loserArr.forEach(p => playerStats[p].losses++);
 
         let champStatus = "";
-        if(court.currentChamp && (court.currentChamp.p1 === winner.p1 || court.currentChamp.p1 === winner.p2)) { 
+        let isSameChamp = false;
+        
+        if (court.currentChamp) {
+            if (req === 1 && court.currentChamp.p1 === winner.p1) isSameChamp = true;
+            if (req === 2 && (court.currentChamp.p1 === winner.p1 || (court.teamA.p2 && court.currentChamp.p1 === winner.p2))) isSameChamp = true;
+        }
+
+        if(isSameChamp) { 
             court.currentChamp.count++; 
         } else { 
-            court.currentChamp = { p1: winner.p1, p2: winner.p2, count: 1 }; 
+            court.currentChamp = req === 1 ? { p1: winner.p1, count: 1 } : { p1: winner.p1, p2: winner.p2, count: 1 }; 
         }
 
         let isChampOut = false;
         if(court.currentChamp.count >= maxChamps) {
             isChampOut = true; champStatus = `(แชมป์ครบ ${maxChamps} สมัย)`;
-            [winner.p1, winner.p2].forEach(p => { if (playerStats[p]) playerStats[p].lastBenchTime = globalMatchCounter; });
-            pushToEliminated(winner.p1); pushToEliminated(winner.p2);
+            winnerArr.forEach(p => { if (playerStats[p]) playerStats[p].lastBenchTime = globalMatchCounter; pushToEliminated(p); });
         } else { champStatus = `(แชมป์ ${court.currentChamp.count} สมัย)`; }
+
+        let winText = req === 1 ? winner.p1 : (winner.p2 ? `${winner.p1}&${winner.p2}` : winner.p1);
+        let loseText = req === 1 ? loser.p1 : (loser.p2 ? `${loser.p1}&${loser.p2}` : loser.p1);
 
         matchHistory.push({ 
             courtName: court.name, round: court.matchRound, 
-            result: `${winner.p1}&${winner.p2} ชนะ ${loser.p1}&${loser.p2} [${court.scoreA}-${court.scoreB}] ${champStatus}` 
+            result: `${winText} ชนะ ${loseText} [${court.scoreA}-${court.scoreB}] ${champStatus}` 
         });
         
         court.nextMatchData = { winner, loser, isChampOut, winnerSide: winnerTeam };
@@ -620,30 +681,39 @@
     function prepareNextMatch(courtIndex) {
         let court = courts[courtIndex];
         let data = court.nextMatchData;
+        let req = (court.matchType === 'singles') ? 1 : 2;
         
         court.isGameOver = false; court.scoreA = 0; court.scoreB = 0; court.matchRound++;
         court.stateBeforeFinishStr = null;
 
         if (data.isChampOut) {
             court.currentChamp = null;
-            let teamA = selectTeam([]);
-            let teamB = selectTeam([teamA[0], teamA[1]]);
-            pullPlayer(teamA[0]); pullPlayer(teamA[1]);
-            pullPlayer(teamB[0]); pullPlayer(teamB[1]);
             
-            let optimized = optimizeFourPlayers([teamA[0], teamA[1], teamB[0], teamB[1]]);
+            let teamA = selectTeam([], req);
+            let teamB = selectTeam([...teamA], req);
+            teamA.forEach(p => pullPlayer(p));
+            teamB.forEach(p => pullPlayer(p));
             
-            court.teamA = { p1: optimized.teamA[0], p2: optimized.teamA[1] };
-            court.teamB = { p1: optimized.teamB[0], p2: optimized.teamB[1] };
+            if (req === 1) {
+                court.teamA = { p1: teamA[0] };
+                court.teamB = { p1: teamB[0] };
+            } else {
+                let optimized = optimizeFourPlayers([...teamA, ...teamB]);
+                court.teamA = { p1: optimized.teamA[0], p2: optimized.teamA[1] };
+                court.teamB = { p1: optimized.teamB[0], p2: optimized.teamB[1] };
+            }
         } else {
-            let champTeam = { p1: data.winner.p1, p2: data.winner.p2 };
-            let challengers = selectTeam([champTeam.p1, champTeam.p2]);
-            pullPlayer(challengers[0]); pullPlayer(challengers[1]);
+            let champTeam = req === 1 ? { p1: data.winner.p1 } : { p1: data.winner.p1, p2: data.winner.p2 };
+            let excludeList = req === 1 ? [champTeam.p1] : [champTeam.p1, champTeam.p2];
+            let challengers = selectTeam(excludeList, req);
+            challengers.forEach(p => pullPlayer(p));
+            
+            let challengerTeam = req === 1 ? { p1: challengers[0] } : { p1: challengers[0], p2: challengers[1] };
             
             if (data.winnerSide === 'A') {
-                court.teamA = champTeam; court.teamB = { p1: challengers[0], p2: challengers[1] };
+                court.teamA = champTeam; court.teamB = challengerTeam;
             } else {
-                court.teamB = champTeam; court.teamA = { p1: challengers[0], p2: challengers[1] };
+                court.teamB = champTeam; court.teamA = challengerTeam;
             }
         }
         
@@ -671,28 +741,45 @@
 
         undoPartnerships(court.teamA, court.teamB);
 
+        let req = (court.matchType === 'singles') ? 1 : 2;
         let onCourt = [];
-        if (court.teamA && court.teamB) {
-            onCourt = [court.teamA.p1, court.teamA.p2, court.teamB.p1, court.teamB.p2];
+        if (court.teamA) {
+            if (court.teamA.p1) onCourt.push(court.teamA.p1);
+            if (court.teamA.p2) onCourt.push(court.teamA.p2);
+        }
+        if (court.teamB) {
+            if (court.teamB.p1) onCourt.push(court.teamB.p1);
+            if (court.teamB.p2) onCourt.push(court.teamB.p2);
         }
 
         court.scoreA = 0; court.scoreB = 0;
+        let expectedPlayers = req === 1 ? 2 : 4;
 
-        if (onCourt.length === 4) {
+        if (onCourt.length === expectedPlayers) {
             mainQueue = mainQueue.filter(p => !onCourt.includes(p));
             eliminatedOrder = eliminatedOrder.filter(p => !onCourt.includes(p));
             
-            let optimized = optimizeFourPlayers(onCourt);
-            court.teamA = { p1: optimized.teamA[0], p2: optimized.teamA[1] };
-            court.teamB = { p1: optimized.teamB[0], p2: optimized.teamB[1] };
+            if (req === 1) {
+                court.teamA = { p1: onCourt[0] };
+                court.teamB = { p1: onCourt[1] };
+            } else {
+                let optimized = optimizeFourPlayers(onCourt);
+                court.teamA = { p1: optimized.teamA[0], p2: optimized.teamA[1] };
+                court.teamB = { p1: optimized.teamB[0], p2: optimized.teamB[1] };
+            }
         } else {
-            let tA = selectTeam([]);
-            let tB = selectTeam([tA[0], tA[1]]);
-            pullPlayer(tA[0]); pullPlayer(tA[1]);
-            pullPlayer(tB[0]); pullPlayer(tB[1]);
+            let tA = selectTeam([], req);
+            let tB = selectTeam([...tA], req);
+            tA.forEach(p => pullPlayer(p));
+            tB.forEach(p => pullPlayer(p));
 
-            court.teamA = { p1: tA[0], p2: tA[1] };
-            court.teamB = { p1: tB[0], p2: tB[1] };
+            if (req === 1) {
+                court.teamA = { p1: tA[0] };
+                court.teamB = { p1: tB[0] };
+            } else {
+                court.teamA = { p1: tA[0], p2: tA[1] };
+                court.teamB = { p1: tB[0], p2: tB[1] };
+            }
         }
 
         recordPartnerships(court.teamA, court.teamB);
@@ -760,14 +847,14 @@
         
         box.innerHTML = `
             <div style="background: #f0fdf4; padding: 12px; border-radius: 8px; border: 1px solid #bbf7d0; font-size: 13px; color: #166534; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-                <strong style="display:block; margin-bottom:6px;">🏸 กรณีลง 1 ทีม (แชมป์เก่าชนะต่อ / หาผู้ท้าชิง):</strong>
+                <strong style="display:block; margin-bottom:6px;">🏸 กรณีหาผู้ท้าชิงแชมป์:</strong>
                 <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #dcfce3;">
                     ${display1}
                 </div>
             </div>
             
             <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; color: #334155; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-                <strong style="display:block; margin-bottom:6px;">⚔️ กรณีลง 2 ทีม (แชมป์เก่าแพ้ / แชมป์ครบโควต้า):</strong>
+                <strong style="display:block; margin-bottom:6px;">⚔️ กรณีล้างสนามจัดใหม่ (ประเภทคู่):</strong>
                 <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #f1f5f9;">
                     ${display2}
                 </div>
@@ -797,7 +884,10 @@
         renderAll(); saveData();
     }
 
-    function getDisplayName(p) { return lockedPairs[p] ? `${p}🔒` : p; }
+    function getDisplayName(p) { 
+        if(!p) return '';
+        return lockedPairs[p] ? `${p}🔒` : p; 
+    }
 
     function addNewPlayer() {
         let name = document.getElementById('newPlayerInput').value.trim();
@@ -896,7 +986,6 @@
             if(startTimeCalculated) {
                 localStorage.setItem('badminton_billing_start_time', startTimeCalculated);
             }
-            
             window.location.href = 'billing.html'; 
         }
 
@@ -908,9 +997,18 @@
 
             let champA = "", champB = "", clsA = "", clsB = "";
             if(court.currentChamp) {
-                if(court.currentChamp.p1 === court.teamA.p1 || court.currentChamp.p1 === court.teamA.p2) { clsA="champ"; champA=`<div class="champ-badge">แชมป์เก่า (${court.currentChamp.count}/${maxChamps})</div>`; }
-                if(court.currentChamp.p1 === court.teamB.p1 || court.currentChamp.p1 === court.teamB.p2) { clsB="champ"; champB=`<div class="champ-badge">แชมป์เก่า (${court.currentChamp.count}/${maxChamps})</div>`; }
+                let isA = court.currentChamp.p1 === court.teamA.p1 || (court.teamA.p2 && court.currentChamp.p1 === court.teamA.p2);
+                let isB = court.currentChamp.p1 === court.teamB.p1 || (court.teamB.p2 && court.currentChamp.p1 === court.teamB.p2);
+                if(isA) { clsA="champ"; champA=`<div class="champ-badge">แชมป์เก่า (${court.currentChamp.count}/${maxChamps})</div>`; }
+                if(isB) { clsB="champ"; champB=`<div class="champ-badge">แชมป์เก่า (${court.currentChamp.count}/${maxChamps})</div>`; }
             }
+
+            let modeSelectHtml = `
+                <select class="protected-btn" onchange="changeCourtMode(${i}, this.value)" style="margin-right: 10px; padding: 6px 10px; border-radius: 6px; font-size: 13px; background: #f8fafc; border: 1px solid #cbd5e1; font-weight:bold; color:var(--dark); outline:none; cursor:pointer;">
+                    <option value="doubles" ${(!court.matchType || court.matchType === 'doubles') ? 'selected' : ''}>🏸 คู่ (2v2)</option>
+                    <option value="singles" ${court.matchType === 'singles' ? 'selected' : ''}>🏃‍♂️ เดี่ยว (1v1)</option>
+                </select>
+            `;
 
             let controlsHtml = '';
             if (court.isGameOver) {
@@ -923,23 +1021,30 @@
                 controlsHtml = `
                     <div class="court-controls">
                         <span style="font-size:14px; color:#64748b; font-weight:bold;">${titleText}</span>
-                        <button class="btn-repair protected-btn" onclick="rePairCourtMatch(${i}, false)">🔄 จัดใหม่สนามนี้</button>
+                        <div style="display:flex; align-items:center;">
+                            ${modeSelectHtml}
+                            <button class="btn-repair protected-btn" onclick="rePairCourtMatch(${i}, false)">🔄 จัดใหม่</button>
+                        </div>
                     </div>`;
             }
+
+            let getFullName = (team) => team.p2 ? `${getDisplayName(team.p1)} & ${getDisplayName(team.p2)}` : getDisplayName(team.p1);
+            let nameA = (court.matchType === 'singles') ? getDisplayName(court.teamA.p1) : getFullName(court.teamA);
+            let nameB = (court.matchType === 'singles') ? getDisplayName(court.teamB.p1) : getFullName(court.teamB);
 
             courtsHtml += `
             <div class="court-wrapper">
                 <div class="court-title">${court.name}</div>
                 <div class="match-board">
                     <div class="team-box protected-btn ${clsA}" onclick="addScore(${i}, 'A')">
-                        <div class="player-names">${getDisplayName(court.teamA.p1)} & ${getDisplayName(court.teamA.p2)}</div>
+                        <div class="player-names">${nameA}</div>
                         ${champA}
                         <div class="score">${court.scoreA}</div>
                         <button class="btn-minus protected-btn" onclick="decreaseScore(${i}, 'A', event)">-1 ลดแต้ม</button>
                     </div>
                     <div class="versus">VS</div>
                     <div class="team-box protected-btn ${clsB}" onclick="addScore(${i}, 'B')">
-                        <div class="player-names">${getDisplayName(court.teamB.p1)} & ${getDisplayName(court.teamB.p2)}</div>
+                        <div class="player-names">${nameB}</div>
                         ${champB}
                         <div class="score">${court.scoreB}</div>
                         <button class="btn-minus protected-btn" onclick="decreaseScore(${i}, 'B', event)">-1 ลดแต้ม</button>
@@ -1282,12 +1387,10 @@
     });
 
     document.addEventListener("DOMContentLoaded", () => {
-        // 📥 ระบบตรวจรับสถานะข้ามมาจากหน้าอื่น (Mid-Game Transfer)
         let transferredState = sessionStorage.getItem('midgame_transfer_state');
         if (transferredState) {
             restoreSnapshot(JSON.parse(transferredState));
-            sessionStorage.removeItem('midgame_transfer_state'); // ล้างทิ้งเพื่อกันบั๊กเวลา Refresh
-            
+            sessionStorage.removeItem('midgame_transfer_state'); 
             document.getElementById('setupSection').classList.remove('active');
             document.getElementById('gameSection').classList.add('active');
             renderAll();
