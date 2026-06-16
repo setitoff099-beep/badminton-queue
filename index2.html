@@ -540,8 +540,8 @@ function selectTeam(excludeList, reqCount = 2) {
 
         // 2. จัดเรียงคิว: "คนที่เล่นน้อยที่สุด" ต้องอยู่หัวแถวเสมอ
         validRawPool.sort((a, b) => {
-            let aPlayed = playerStats[a] ? (playerStats[a].playedCount || 0) : 0;
-            let bPlayed = playerStats[b] ? (playerStats[b].playedCount || 0) : 0;
+            let aPlayed = playerStats[a] ? (playerStats[a].played || 0) : 0;
+            let bPlayed = playerStats[b] ? (playerStats[b].played || 0) : 0;
             return aPlayed - bPlayed; 
         });
 
@@ -573,9 +573,9 @@ function selectTeam(excludeList, reqCount = 2) {
                 let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
                 if (candidates.length > 0) {
                     // บังคับให้ต้องจับคู่กับคนที่ "เล่นน้อยที่สุด" ในกลุ่มคนโสดด้วยกันเท่านั้น
-                    let minCandidatePlay = playerStats[candidates[0]] ? (playerStats[candidates[0]].playedCount || 0) : 0;
+                    let minCandidatePlay = playerStats[candidates[0]] ? (playerStats[candidates[0]].played || 0) : 0;
                     let bestCandidates = candidates.filter(c => {
-                        let cPlayed = playerStats[c] ? (playerStats[c].playedCount || 0) : 0;
+                        let cPlayed = playerStats[c] ? (playerStats[c].played || 0) : 0;
                         return cPlayed === minCandidatePlay;
                     });
 
