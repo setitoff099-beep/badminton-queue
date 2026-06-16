@@ -128,9 +128,11 @@
             </select>
         </div>
         <div class="form-group">
-            <label>2. กรอกรายชื่อผู้เล่นตั้งต้น (1 ชื่อต่อ 1 บรรทัด):</label>
-            <textarea id="playerInput" rows="8" placeholder="เจ่ง&#10;จี&#10;นนท์นี่&#10;กาย&#10;ฟ้า&#10;เบนซ์&#10;ป๊อบ&#10;อาร์ท"></textarea>
-        </div>
+                    <label>2. กรอกรายชื่อผู้เล่นตั้งต้น (1 ชื่อต่อ 1 บรรทัด):
+                        <br><span style="font-size:12px; color:var(--primary); font-weight:normal;">💡 ทริค: หากต้องการล็อคคู่ตั้งแต่แรก ให้พิมพ์ชื่อติดกันด้วยเครื่องหมายบวก เช่น <strong>เจ๋ง+จี</strong></span>
+                    </label>
+                    <textarea id="playerInput" rows="8" placeholder="เจ๋ง+จี&#10;นนท์นี่&#10;กาย&#10;ฟ้า+เบนซ์&#10;ป๊อบ&#10;อาร์ท"></textarea>
+                </div>
         <div class="form-group">
             <label>3. คะแนนชนะในแต่ละเกม (เริ่มต้น):</label>
             <input type="number" id="winScore" value="21" min="1">
@@ -309,6 +311,16 @@
     let startTimeCalculated = null;
     let globalMatchCounter = 0;
 
+    // --- เพิ่มโค้ดส่วนนี้ ---
+    let cachedNextMatch = null;
+
+    function clearPreviewCache() {
+        cachedNextMatch = null;
+        let previewBox = document.getElementById('nextUpPreviewBox');
+        if (previewBox) previewBox.innerHTML = '';
+    }
+    // -
+
     function getCurrentTimeStr() {
         let now = new Date();
         return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
@@ -419,38 +431,63 @@
     }
 
     function startTournament() {
-        const text = document.getElementById('playerInput').value.trim();
-        if(!text) { alert('กรุณากรอกชื่อผู้เล่นครับ'); return; }
-        
-        let rawPlayers = text.split('\n').map(p => p.trim()).filter(p => p !== "");
-        players = [...new Set(rawPlayers)]; 
-        
-        numCourts = parseInt(document.getElementById('numCourtsSetting').value) || 1;
-        let requiredPlayers = numCourts * 4;
-        
-        if(players.length < requiredPlayers) { 
-            if(!confirm(`ถ้าเปิด ${numCourts} สนาม ปกติควรมีผู้เล่นเริ่มต้นอย่างน้อย ${requiredPlayers} คน แต่ถ้าคุณต้องการเล่น "ประเภทเดี่ยว (1v1)" คุณสามารถกดยืนยันเพื่อเริ่มได้เลยครับ ยืนยันหรือไม่?`)) return;
-        }
+            const text = document.getElementById('playerInput').value.trim();
+            if(!text) { alert('กรุณากรอกชื่อผู้เล่นครับ'); return; }
+            
+            // --- ส่วนที่แก้ไขใหม่: ดึงชื่อผู้เล่นและเช็คสัญลักษณ์ + ---
+            let rawLines = text.split('\n').map(p => p.trim()).filter(p => p !== "");
+            let extractedPlayers = [];
+            
+            rawLines.forEach(line => {
+                if(line.includes('+')) {
+                    // ถ้ามี + ให้แยกชื่อออกเป็น 2 คน
+                    let pair = line.split('+').map(p => p.trim()).filter(p => p !== "");
+                    extractedPlayers.push(...pair);
+                } else {
+                    extractedPlayers.push(line);
+                }
+            });
+            
+            players = [...new Set(extractedPlayers)]; // ตัดชื่อที่อาจจะซ้ำกันออก
+            
+            numCourts = parseInt(document.getElementById('numCourtsSetting').value) || 1;
+            let requiredPlayers = numCourts * 4;
+            
+            if(players.length < requiredPlayers) { 
+                if(!confirm(`ถ้าเปิด ${numCourts} สนาม ปกติควรมีผู้เล่นเริ่มต้นอย่างน้อย ${requiredPlayers} คน แต่ถ้าคุณต้องการเล่น "ประเภทเดี่ยว (1v1)" คุณสามารถกดยืนยันเพื่อเริ่มได้เลยครับ ยืนยันหรือไม่?`)) return;
+            }
 
-        winScore = parseInt(document.getElementById('winScore').value) || 21;
-        maxChamps = parseInt(document.getElementById('maxChamps').value) || 1;
-        
-        const now = new Date();
-        const h = String(now.getHours()).padStart(2, '0');
-        const m = String(now.getMinutes()).padStart(2, '0');
-        startTimeExact = `${h}:${m}`;
-        const calcM = now.getMinutes() >= 30 ? '30' : '00';
-        startTimeCalculated = `${h}:${calcM}`;
-        
-        initFreshData();
-        mainQueue = [...players].sort(() => 0.5 - Math.random());
-        
-        document.getElementById('setupSection').classList.remove('active');
-        document.getElementById('gameSection').classList.add('active');
-        
-        setupAllCourts();
-        saveData(); 
-    }
+            winScore = parseInt(document.getElementById('winScore').value) || 21;
+            maxChamps = parseInt(document.getElementById('maxChamps').value) || 1;
+            
+            const now = new Date();
+            const h = String(now.getHours()).padStart(2, '0');
+            const m = String(now.getMinutes()).padStart(2, '0');
+            startTimeExact = `${h}:${m}`;
+            const calcM = now.getMinutes() >= 30 ? '30' : '00';
+            startTimeCalculated = `${h}:${calcM}`;
+            
+            initFreshData(); // ฟังก์ชันนี้จะเคลียร์ค่า lockedPairs เราจึงต้องเซ็ตค่าใหม่ด้านล่าง
+            
+            // --- ส่วนที่แก้ไขใหม่: บันทึกการล็อคคู่เข้าสู่ระบบ ---
+            rawLines.forEach(line => {
+                if(line.includes('+')) {
+                    let pair = line.split('+').map(p => p.trim()).filter(p => p !== "");
+                    if(pair.length >= 2) {
+                        lockedPairs[pair[0]] = pair[1];
+                        lockedPairs[pair[1]] = pair[0];
+                    }
+                }
+            });
+            
+            mainQueue = [...players].sort(() => 0.5 - Math.random());
+            
+            document.getElementById('setupSection').classList.remove('active');
+            document.getElementById('gameSection').classList.add('active');
+            
+            setupAllCourts(); // ระบบจะจับคู่ตาม lockedPairs อัตโนมัติในฟังก์ชันนี้
+            saveData(); 
+        }
 
     function initFreshData() {
         eliminatedOrder = []; matchHistory = []; courts = [];
@@ -487,39 +524,69 @@
         eliminatedOrder = eliminatedOrder.filter(p => p !== playerName);
     }
 
-    function selectTeam(excludeList, reqCount = 2) {
+function selectTeam(excludeList, reqCount = 2) {
         let rawPool = getAvailablePlayers(excludeList);
-        let pool = rawPool;
-        let restedPool = rawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime !== globalMatchCounter);
         
-        if (restedPool.length >= reqCount || (restedPool.length === 1 && rawPool.length === 1)) {
+        // 1. กรองคนที่คู่ล็อคไม่อยู่ในคิวออกไปก่อน
+        let validRawPool = rawPool.filter(p => !lockedPairs[p] || rawPool.includes(lockedPairs[p]));
+        if (validRawPool.length < reqCount) {
+            validRawPool = rawPool; 
+        }
+
+        // 2. จัดเรียงคิว: "คนที่เล่นน้อยที่สุด" ต้องอยู่หัวแถวเสมอ
+        validRawPool.sort((a, b) => {
+            let aPlayed = playerStats[a] ? (playerStats[a].playedCount || 0) : 0;
+            let bPlayed = playerStats[b] ? (playerStats[b].playedCount || 0) : 0;
+            return aPlayed - bPlayed; 
+        });
+
+        let pool = validRawPool;
+        
+        // 3. แยกกลุ่มคนที่ "กำลังพักอยู่" เพื่อไม่ให้ลงเตะติดกัน
+        let restedPool = validRawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime !== globalMatchCounter);
+        
+        if (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1)) {
             pool = restedPool;
         }
 
-        if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : rawPool.slice(0, 1);
-        if (pool.length < 2) return rawPool.slice(0, 2); 
+        if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : validRawPool.slice(0, 1);
+        if (pool.length < 2) return validRawPool.slice(0, 2); 
 
+        // 🌟 4. [ลอจิกใหม่] ไล่จัดทีมจาก "หัวคิว" (คนที่เล่นน้อยสุด) ลงมาเท่านั้น ห้ามข้ามคิว!
         for (let i = 0; i < pool.length; i++) {
             let p1 = pool[i];
+            
+            // กรณีที่คนหัวคิว "มีคู่ล็อค"
             if (lockedPairs[p1]) {
                 let lp = lockedPairs[p1];
-                if (pool.includes(lp)) return [p1, lp]; 
-                continue; 
-            }
-            let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
-            if (candidates.length > 0) {
-                let bestP2 = candidates[0];
-                let minHist = Infinity;
-                for (let c of candidates) {
-                    let htmlCount = historyPairs[p1][c] || 0;
-                    if (htmlCount < minHist) { minHist = htmlCount; bestP2 = c; }
+                if (validRawPool.includes(lp)) {
+                    return [p1, lp]; 
                 }
-                return [p1, bestP2];
-            } else {
-                let fallbackCandidates = pool.filter(p => p !== p1);
-                if (fallbackCandidates.length > 0) return [p1, fallbackCandidates[0]];
+            } 
+            // กรณีที่คนหัวคิว "ไม่มีคู่ล็อค" (เช่น ลุงจ้อย ฟ่า เก้น)
+            else {
+                let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
+                if (candidates.length > 0) {
+                    // บังคับให้ต้องจับคู่กับคนที่ "เล่นน้อยที่สุด" ในกลุ่มคนโสดด้วยกันเท่านั้น
+                    let minCandidatePlay = playerStats[candidates[0]] ? (playerStats[candidates[0]].playedCount || 0) : 0;
+                    let bestCandidates = candidates.filter(c => {
+                        let cPlayed = playerStats[c] ? (playerStats[c].playedCount || 0) : 0;
+                        return cPlayed === minCandidatePlay;
+                    });
+
+                    let bestP2 = bestCandidates[0];
+                    let minHist = Infinity;
+                    // เลือกคู่ที่ประวัติการเจอกันน้อยที่สุด
+                    for (let c of bestCandidates) {
+                        let htmlCount = historyPairs[p1][c] || 0;
+                        if (htmlCount < minHist) { minHist = htmlCount; bestP2 = c; }
+                    }
+                    return [p1, bestP2];
+                }
             }
         }
+        
+        // Fallback: หากหาคู่ไม่ได้จริงๆ
         return pool.slice(0, 2);
     }
 
@@ -640,6 +707,7 @@
 
     // --- ระบบหยุดพักคอร์ท (Pause Court) ---
     window.togglePauseCourt = function(courtIndex) {
+        clearPreviewCache();
         let court = courts[courtIndex];
 
         if (court.isPaused) {
@@ -775,78 +843,107 @@
     }
 
     function prepareNextMatch(courtIndex) {
-        let court = courts[courtIndex];
-        if (court.isPaused) return;
+            let court = courts[courtIndex];
+            if (court.isPaused) return;
 
-        let data = court.nextMatchData;
-        let req = (court.matchType === 'singles') ? 1 : 2;
-        
-        court.isGameOver = false; court.scoreA = 0; court.scoreB = 0; court.matchRound++;
-        court.stateBeforeFinishStr = null;
+            let data = court.nextMatchData;
+            let req = (court.matchType === 'singles') ? 1 : 2;
+            
+            court.isGameOver = false; court.scoreA = 0; court.scoreB = 0; court.matchRound++;
+            //court.stateBeforeFinishStr = null; // ปิดไว้เพื่อให้ย้อนผลได้
 
-        if (data.isChampOut) {
-            court.currentChamp = null;
+            if (data.isChampOut) {
+                court.currentChamp = null;
 
-            // 🔧 [SILO BREAKER]
-            if (players.length === 8 && numCourts === 1 && court.matchType !== 'singles') {
-                if (globalMatchCounter % 3 === 0) {
-                    let waitP = eliminatedOrder.find(p => playerStats[p].lastBenchTime !== globalMatchCounter);
-                    let justP = eliminatedOrder.find(p => playerStats[p].lastBenchTime === globalMatchCounter);
-                    if (waitP && justP) {
-                        playerStats[justP].lastBenchTime = 0; 
-                        playerStats[waitP].lastBenchTime = globalMatchCounter; 
-                        let popup = document.createElement('div');
-                        popup.innerHTML = `🔀 <b>ระบบทลายกลุ่มปิด (Silo) ทำงาน!</b><br>ดึง <b>${justP}</b> (ตีต่อ) สลับกับ <b>${waitP}</b> (ได้พักต่อ)`;
-                        popup.style.cssText = "position:fixed; top:20px; right:20px; background:#f59e0b; color:#fff; padding:15px; border-radius:8px; z-index:9999; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-size:14px;";
-                        document.body.appendChild(popup);
-                        setTimeout(() => popup.remove(), 4000);
+                // 🔧 [SILO BREAKER]
+                if (players.length === 8 && numCourts === 1 && court.matchType !== 'singles') {
+                    if (globalMatchCounter % 3 === 0) {
+                        let waitP = eliminatedOrder.find(p => playerStats[p].lastBenchTime !== globalMatchCounter && !lockedPairs[p]);
+                        let justP = eliminatedOrder.find(p => playerStats[p].lastBenchTime === globalMatchCounter && !lockedPairs[p]);
+                        if (waitP && justP) {
+                            playerStats[justP].lastBenchTime = 0; 
+                            playerStats[waitP].lastBenchTime = globalMatchCounter; 
+                            let popup = document.createElement('div');
+                            popup.innerHTML = `🔀 <b>ระบบทลายกลุ่มปิด (Silo) ทำงาน!</b><br>ดึง <b>${justP}</b> (ตีต่อ) สลับกับ <b>${waitP}</b> (ได้พักต่อ)`;
+                            popup.style.cssText = "position:fixed; top:20px; right:20px; background:#f59e0b; color:#fff; padding:15px; border-radius:8px; z-index:9999; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-size:14px;";
+                            document.body.appendChild(popup);
+                            setTimeout(() => popup.remove(), 4000);
+                            clearPreviewCache(); // ล้างแคชทิ้งถ้า Silo Breaker ทำงาน
+                        }
                     }
                 }
-            }
 
-            let teamA = selectTeam([], req);
-            let teamB = selectTeam([...teamA], req);
-            teamA.forEach(p => pullPlayer(p));
-            teamB.forEach(p => pullPlayer(p));
-            
-            if (req === 1) {
-                court.teamA = { p1: teamA[0] };
-                court.teamB = { p1: teamB[0] };
+                let teamA, teamB;
+                // โหลด 4 คนจาก Cache ถ้ามี และกำลังเล่นคู่
+                if (cachedNextMatch && cachedNextMatch.fullMatch && req === 2) {
+                    let opt = cachedNextMatch.fullMatch;
+                    teamA = [opt.teamA[0], opt.teamA[1]];
+                    teamB = [opt.teamB[0], opt.teamB[1]];
+                } else {
+                    teamA = selectTeam([], req);
+                    teamB = selectTeam([...teamA], req);
+                }
+
+                teamA.forEach(p => pullPlayer(p));
+                teamB.forEach(p => pullPlayer(p));
+                
+                if (req === 1) {
+                    court.teamA = { p1: teamA[0] };
+                    court.teamB = { p1: teamB[0] };
+                } else {
+                    let optimized = optimizeFourPlayers([...teamA, ...teamB]);
+                    court.teamA = { p1: optimized.teamA[0], p2: optimized.teamA[1] };
+                    court.teamB = { p1: optimized.teamB[0], p2: optimized.teamB[1] };
+                }
             } else {
-                let optimized = optimizeFourPlayers([...teamA, ...teamB]);
-                court.teamA = { p1: optimized.teamA[0], p2: optimized.teamA[1] };
-                court.teamB = { p1: optimized.teamB[0], p2: optimized.teamB[1] };
+                let champTeam = req === 1 ? { p1: data.winner.p1 } : { p1: data.winner.p1, p2: data.winner.p2 };
+                let excludeList = req === 1 ? [champTeam.p1] : [champTeam.p1, champTeam.p2];
+                
+                let challengers;
+                // โหลดผู้ท้าชิงจาก Cache ถ้ามี
+                if (cachedNextMatch && cachedNextMatch.challengers && req === 2) {
+                    challengers = cachedNextMatch.challengers;
+                    // เซฟตี้: เช็คว่าคนที่ถูกแคชไว้ไม่ใช่แชมป์เก่า
+                    if (challengers.includes(champTeam.p1) || (champTeam.p2 && challengers.includes(champTeam.p2))) {
+                        challengers = selectTeam(excludeList, req); 
+                    }
+                } else {
+                    challengers = selectTeam(excludeList, req);
+                }
+
+                challengers.forEach(p => pullPlayer(p));
+                
+                let challengerTeam = req === 1 ? { p1: challengers[0] } : { p1: challengers[0], p2: challengers[1] };
+                
+                if (data.winnerSide === 'A') {
+                    court.teamA = champTeam; court.teamB = challengerTeam;
+                } else {
+                    court.teamB = champTeam; court.teamA = challengerTeam;
+                }
             }
-        } else {
-            let champTeam = req === 1 ? { p1: data.winner.p1 } : { p1: data.winner.p1, p2: data.winner.p2 };
-            let excludeList = req === 1 ? [champTeam.p1] : [champTeam.p1, champTeam.p2];
-            let challengers = selectTeam(excludeList, req);
-            challengers.forEach(p => pullPlayer(p));
             
-            let challengerTeam = req === 1 ? { p1: challengers[0] } : { p1: challengers[0], p2: challengers[1] };
+            recordPartnerships(court.teamA, court.teamB); 
             
-            if (data.winnerSide === 'A') {
-                court.teamA = champTeam; court.teamB = challengerTeam;
-            } else {
-                court.teamB = champTeam; court.teamA = challengerTeam;
-            }
+            // ล้างความจำหลังใช้งานเสร็จทันที
+            clearPreviewCache(); 
+            
+            renderAll();
+            saveData();
         }
-        
-        recordPartnerships(court.teamA, court.teamB); 
-        document.getElementById('nextUpPreviewBox').innerHTML = '';
-        renderAll();
-        saveData();
-    }
 
     function undoFinishMatch(courtIndex) {
-        let court = courts[courtIndex];
-        if(!court.stateBeforeFinishStr) return;
-        restoreSnapshot(JSON.parse(court.stateBeforeFinishStr));
-        renderAll();
-        saveData();
-    }
+            let court = courts[courtIndex];
+            if(!court.stateBeforeFinishStr) return;
+            
+            if(!confirm('คุณต้องการย้อนกลับไปแก้ไขผลแมตช์ก่อนหน้านี้ใช่หรือไม่?\n(ระบบจะดึงรายชื่อและคะแนนทั้งหมดกลับมาเหมือนตอนก่อนจบเกม)')) return;
+
+            restoreSnapshot(JSON.parse(court.stateBeforeFinishStr));
+            renderAll();
+            saveData();
+        }
 
     function rePairCourtMatch(courtIndex, auto = false) {
+        clearPreviewCache();
         let court = courts[courtIndex];
         if (court.isGameOver || court.isPaused) return;
         if (!auto && (court.scoreA > 0 || court.scoreB > 0)) {
@@ -911,6 +1008,7 @@
     }
 
     function togglePlayerBreak(name) {
+        clearPreviewCache();
         let onCourt = false;
         courts.forEach(c => {
             if(!c.isPaused && ((c.teamA && (c.teamA.p1 === name || c.teamA.p2 === name)) || 
@@ -933,36 +1031,48 @@
     }
 
     window.generateNextPreview = function() {
-        let pool = getAvailablePlayers([]);
-        let box = document.getElementById('nextUpPreviewBox');
-        
-        if (pool.length < 2) {
-            box.innerHTML = `<div style="background: #fef2f2; padding: 12px; border-radius: 8px; border: 1px solid #fecaca; font-size: 13px; color: #b91c1c;">❌ <strong>ยังไม่สามารถจัดคู่ล่วงหน้าได้:</strong> มีผู้เล่นว่างรออยู่ข้างสนามไม่ถึง 2 คน</div>`;
-            return;
-        }
+            let pool = getAvailablePlayers([]);
+            let box = document.getElementById('nextUpPreviewBox');
+            
+            if (pool.length < 2) {
+                box.innerHTML = `<div style="background: #fef2f2; padding: 12px; border-radius: 8px; border: 1px solid #fecaca; font-size: 13px; color: #b91c1c;">❌ <strong>ยังไม่สามารถจัดคู่ล่วงหน้าได้:</strong> มีผู้เล่นว่างรออยู่ข้างสนามไม่ถึง 2 คน</div>`;
+                cachedNextMatch = null; // ล้างค่าทิ้งถ้าคนไม่พอ
+                return;
+            }
 
-        let teamChallenger = selectTeam([]);
-        let display1 = `<span style="color:#3b82f6;">${getDisplayName(teamChallenger[0])} & ${getDisplayName(teamChallenger[1])}</span>`;
-        let display2 = `<span style="color:#94a3b8; font-size:13px; font-weight:normal;">(ยังคำนวณไม่ได้: ต้องมีคนรอคิว 4 คนขึ้นไป)</span>`;
-        if (pool.length >= 4) {
-            let tA = selectTeam([]);
-            let tB = selectTeam([tA[0], tA[1]]);
-            let optimized = optimizeFourPlayers([tA[0], tA[1], tB[0], tB[1]]);
-            display2 = `<span style="color:#3b82f6;">${getDisplayName(optimized.teamA[0])} & ${getDisplayName(optimized.teamA[1])}</span> <span style="color: #94a3b8; font-weight: normal; margin: 0 10px;">VS</span> <span style="color:#ef4444;">${getDisplayName(optimized.teamB[0])} & ${getDisplayName(optimized.teamB[1])}</span>`;
+            let teamChallenger = selectTeam([]);
+            let display1 = `<span style="color:#3b82f6;">${getDisplayName(teamChallenger[0])} & ${getDisplayName(teamChallenger[1])}</span>`;
+            let display2 = `<span style="color:#94a3b8; font-size:13px; font-weight:normal;">(ยังคำนวณไม่ได้: ต้องมีคนรอคิว 4 คนขึ้นไป)</span>`;
+            
+            let fullMatchObj = null;
+
+            if (pool.length >= 4) {
+                let tA = selectTeam([]);
+                let tB = selectTeam([tA[0], tA[1]]);
+                let optimized = optimizeFourPlayers([tA[0], tA[1], tB[0], tB[1]]);
+                fullMatchObj = optimized;
+                display2 = `<span style="color:#3b82f6;">${getDisplayName(optimized.teamA[0])} & ${getDisplayName(optimized.teamA[1])}</span> <span style="color: #94a3b8; font-weight: normal; margin: 0 10px;">VS</span> <span style="color:#ef4444;">${getDisplayName(optimized.teamB[0])} & ${getDisplayName(optimized.teamB[1])}</span>`;
+            }
+            
+            // บันทึกค่าลงความจำ
+            cachedNextMatch = {
+                challengers: teamChallenger,
+                fullMatch: fullMatchObj
+            };
+            
+            box.innerHTML = `
+                <div style="background: #f0fdf4; padding: 12px; border-radius: 8px; border: 1px solid #bbf7d0; font-size: 13px; color: #166534; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                    <strong style="display:block; margin-bottom:6px;">🏸 กรณีหาผู้ท้าชิงแชมป์:</strong>
+                    <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #dcfce3;">${display1}</div>
+                </div>
+                <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; color: #334155; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                    <strong style="display:block; margin-bottom:6px;">⚔️ กรณีล้างสนามจัดใหม่ (ประเภทคู่):</strong>
+                    <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #f1f5f9;">${display2}</div>
+                </div>`;
         }
-        
-        box.innerHTML = `
-            <div style="background: #f0fdf4; padding: 12px; border-radius: 8px; border: 1px solid #bbf7d0; font-size: 13px; color: #166534; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-                <strong style="display:block; margin-bottom:6px;">🏸 กรณีหาผู้ท้าชิงแชมป์:</strong>
-                <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #dcfce3;">${display1}</div>
-            </div>
-            <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; color: #334155; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-                <strong style="display:block; margin-bottom:6px;">⚔️ กรณีล้างสนามจัดใหม่ (ประเภทคู่):</strong>
-                <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #f1f5f9;">${display2}</div>
-            </div>`;
-    }
 
     function lockPair() {
+        clearPreviewCache();
         let p1 = document.getElementById('lockP1').value;
         let p2 = document.getElementById('lockP2').value;
         if (!p1 || !p2) return alert('กรุณาเลือกผู้เล่นให้ครบ 2 คนครับ');
@@ -981,6 +1091,7 @@
     }
 
     function unlockPair(p1) {
+        clearPreviewCache();
         let p2 = lockedPairs[p1];
         delete lockedPairs[p1]; if (p2) delete lockedPairs[p2];
         renderAll(); saveData();
@@ -992,6 +1103,7 @@
     }
 
     function addNewPlayer() {
+        clearPreviewCache();
         let name = document.getElementById('newPlayerInput').value.trim();
         if(!name) return;
         if(players.includes(name)) return alert('ชื่อนี้มีอยู่ในระบบแล้วครับ');
@@ -1009,6 +1121,7 @@
     }
 
     function removePlayer() {
+        clearPreviewCache();
         let name = document.getElementById('removePlayerSelect').value;
         if(!name) return;
         
@@ -1133,16 +1246,20 @@
                         <button class="btn-secondary protected-btn" onclick="undoFinishMatch(${i})" style="width:auto; margin:0; padding:10px 20px; background:#94a3b8;">ย้อนกลับ</button>
                     </div>`;
             } else {
-                controlsHtml = `
-                    <div class="court-controls">
-                        <span style="font-size:14px; color:#64748b; font-weight:bold;">${titleText} (จบ ${targetWin} แต้ม)</span>
-                        <div style="display:flex; align-items:center; gap: 8px;">
-                            ${modeSelectHtml}
-                            <button class="btn-repair protected-btn" onclick="rePairCourtMatch(${i}, false)">🔄 จัดใหม่</button>
-                            <button class="btn-pause protected-btn" onclick="togglePauseCourt(${i})">⏸️ พักคอร์ท</button>
-                        </div>
-                    </div>`;
-            }
+                        // เช็คว่ามีประวัติให้ย้อนหรือไม่ ถ้ามีให้แสดงปุ่ม
+                        let undoBtnHtml = court.stateBeforeFinishStr ? `<button class="btn-secondary protected-btn" onclick="undoFinishMatch(${i})" style="background:#ef4444; color:white; border:none; padding:6px 12px; border-radius:6px; font-size:13px; font-weight:bold; cursor:pointer; width:auto; margin:0;">⏪ ย้อนผล</button>` : '';
+
+                        controlsHtml = `
+                            <div class="court-controls">
+                                <span style="font-size:14px; color:#64748b; font-weight:bold;">${titleText} (จบ ${targetWin} แต้ม)</span>
+                                <div style="display:flex; align-items:center; gap: 8px;">
+                                    ${modeSelectHtml}
+                                    <button class="btn-repair protected-btn" onclick="rePairCourtMatch(${i}, false)">🔄 จัดใหม่</button>
+                                    <button class="btn-pause protected-btn" onclick="togglePauseCourt(${i})">⏸️ พักคอร์ท</button>
+                                    ${undoBtnHtml}
+                                </div>
+                            </div>`;
+                    }
 
             let getFullName = (team) => team.p2 ? `${getDisplayName(team.p1)} & ${getDisplayName(team.p2)}` : getDisplayName(team.p1);
             let nameA = (court.matchType === 'singles') ? getDisplayName(court.teamA.p1) : getFullName(court.teamA);
