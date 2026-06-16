@@ -760,24 +760,31 @@ function selectTeam(excludeList, reqCount = 2) {
     }
 
     function addScore(courtIndex, team) {
-        let court = courts[courtIndex];
-        if(court.isGameOver || court.isPaused) return;
-        
-        court.stateBeforeFinishStr = createDeepSnapshot(); 
+            let court = courts[courtIndex];
+            if (court.isGameOver || court.isPaused) return;
+            
+            // เช็กว่าแต้มที่กำลังจะบวกนี้ ทำให้จบเกมหรือไม่
+            let nextA = court.scoreA + (team === 'A' ? 1 : 0);
+            let nextB = court.scoreB + (team === 'B' ? 1 : 0);
+            let maxScore = Math.max(nextA, nextB);
+            let minScore = Math.min(nextA, nextB);
+            let targetWin = court.winScore || winScore;
+            
+            // เซฟข้อมูลเฉพาะตอนที่แต้มถึงจุดที่ "จบเกม" เท่านั้น ไม่ต้องเซฟทุกแต้มเพื่อประหยัด RAM
+            if (maxScore >= targetWin && (maxScore - minScore >= 2 || maxScore === 30)) {
+                court.stateBeforeFinishStr = createDeepSnapshot(); 
+            }
 
-        if(team === 'A') court.scoreA++; else court.scoreB++;
-        
-        let maxScore = Math.max(court.scoreA, court.scoreB);
-        let minScore = Math.min(court.scoreA, court.scoreB);
-        let targetWin = court.winScore || winScore;
-        
-        if (maxScore >= targetWin && (maxScore - minScore >= 2 || maxScore === 30)) {
-            finishMatch(courtIndex, court.scoreA > court.scoreB ? 'A' : 'B');
-            return;
+            if (team === 'A') court.scoreA++; else court.scoreB++;
+            
+            if (maxScore >= targetWin && (maxScore - minScore >= 2 || maxScore === 30)) {
+                finishMatch(courtIndex, court.scoreA > court.scoreB ? 'A' : 'B');
+                return;
+            }
+            
+            renderAll();
+            saveData();
         }
-        renderAll();
-        saveData();
-    }
 
     function decreaseScore(courtIndex, team, event) {
         if(event) event.stopPropagation();
@@ -1389,13 +1396,20 @@ function selectTeam(excludeList, reqCount = 2) {
     }
 
     function createDeepSnapshot() {
-        return JSON.stringify({ 
-            players, mainQueue, historyPairs, eliminatedOrder, 
-            matchHistory, playerStats, lockedPairs, numCourts, 
-            winScore, maxChamps, courts,
-            startTimeExact, startTimeCalculated, globalMatchCounter
-        });
-    }
+            // ลบ stateBeforeFinishStr ออกก่อนแปลงเป็น JSON เพื่อป้องกัน Memory Leak จากการเซฟซ้อนทับกัน
+            let cleanCourts = courts.map(c => {
+                let clone = { ...c };
+                clone.stateBeforeFinishStr = null; 
+                return clone;
+            });
+
+            return JSON.stringify({ 
+                players, mainQueue, historyPairs, eliminatedOrder, 
+                matchHistory, playerStats, lockedPairs, numCourts, 
+                winScore, maxChamps, courts: cleanCourts,
+                startTimeExact, startTimeCalculated, globalMatchCounter
+            });
+        }
 
     function restoreSnapshot(st) {
         players = st.players || []; 
