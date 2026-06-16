@@ -528,56 +528,67 @@
 function selectTeam(excludeList, reqCount = 2) {
         let rawPool = getAvailablePlayers(excludeList);
         
-        // 1. กรองคนที่คู่ล็อคไม่อยู่ในคิวออก
+        // 1. กรองคนที่คู่ล็อคไม่อยู่ในคิวออกไปก่อน
         let validRawPool = rawPool.filter(p => !lockedPairs[p] || rawPool.includes(lockedPairs[p]));
-        if (validRawPool.length < reqCount) validRawPool = rawPool; 
+        if (validRawPool.length < reqCount) {
+            validRawPool = rawPool; 
+        }
 
-        // 2. จัดเรียงคิวตามคนที่เล่นน้อยที่สุด
+        // 2. จัดเรียงคิว: "คนที่เล่นน้อยที่สุด" ต้องอยู่หัวแถวเสมอ
         validRawPool.sort((a, b) => {
             let aPlayed = playerStats[a] ? (playerStats[a].played || 0) : 0;
             let bPlayed = playerStats[b] ? (playerStats[b].played || 0) : 0;
             return aPlayed - bPlayed; 
         });
 
-        if (reqCount === 1) return validRawPool.slice(0, 1);
-        if (validRawPool.length < 2) return validRawPool.slice(0, 2); 
-
-        // 3. หา คนแรก (P1) โดยให้สิทธิ์คนที่นั่งพักอยู่และเล่นน้อยสุดก่อน
+        let pool = validRawPool;
+        
+        // 3. แยกกลุ่มคนที่ "กำลังพักอยู่" เพื่อไม่ให้ลงเตะติดกัน
         let restedPool = validRawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime !== globalMatchCounter);
-        let p1 = restedPool.length > 0 ? restedPool[0] : validRawPool[0];
-
-        // ถ้า P1 มีคู่ล็อค
-        if (lockedPairs[p1] && validRawPool.includes(lockedPairs[p1])) {
-            return [p1, lockedPairs[p1]]; 
+        
+        if (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1)) {
+            pool = restedPool;
         }
 
-        // 4. ค้นหา คนที่สอง (P2) ด้วยระบบให้คะแนนบทลงโทษ (คะแนนยิ่งน้อยยิ่งมีโอกาสได้ลง)
-        let candidates = validRawPool.filter(p => p !== p1 && !lockedPairs[p]);
-        if (candidates.length === 0) return validRawPool.slice(0, 2);
+        if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : validRawPool.slice(0, 1);
+        if (pool.length < 2) return validRawPool.slice(0, 2); 
 
-        let p1Played = playerStats[p1] ? (playerStats[p1].played || 0) : 0;
-        let bestP2 = candidates[0];
-        let minScore = Infinity;
-
-        for (let c of candidates) {
-            let cPlayed = playerStats[c] ? (playerStats[c].played || 0) : 0;
-            let histCount = historyPairs[p1][c] || 0;
-            let isJustRested = (playerStats[c] && playerStats[c].lastBenchTime === globalMatchCounter) ? 1 : 0;
-
-            // 🎯 กำหนดน้ำหนักบทลงโทษ (คุณสามารถปรับเลขพวกนี้ได้ตามใจชอบ!)
-            let penaltyJustRested = isJustRested * 100; // โดน 100 แต้ม ถ้าเพิ่งเดินออกจากคอร์ท (ควรพัก)
-            let penaltyHistory = histCount * 150;       // โดน 150 แต้ม ต่อการเคยคู่กัน 1 ครั้ง (รังเกียจคู่เดิม)
-            let penaltyPlayedGap = (cPlayed - p1Played) * 10; // โดน 10 แต้ม ต่อจำนวนเกมที่ลงตีนำหน้าคนอื่นไปแล้ว
-
-            let score = penaltyJustRested + penaltyHistory + penaltyPlayedGap;
+        // 🌟 4. [ลอจิกใหม่] ไล่จัดทีมจาก "หัวคิว" (คนที่เล่นน้อยสุด) ลงมาเท่านั้น ห้ามข้ามคิว!
+        for (let i = 0; i < pool.length; i++) {
+            let p1 = pool[i];
             
-            if (score < minScore) {
-                minScore = score;
-                bestP2 = c;
+            // กรณีที่คนหัวคิว "มีคู่ล็อค"
+            if (lockedPairs[p1]) {
+                let lp = lockedPairs[p1];
+                if (validRawPool.includes(lp)) {
+                    return [p1, lp]; 
+                }
+            } 
+            // กรณีที่คนหัวคิว "ไม่มีคู่ล็อค" (เช่น ลุงจ้อย ฟ่า เก้น)
+            else {
+                let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
+                if (candidates.length > 0) {
+                    // บังคับให้ต้องจับคู่กับคนที่ "เล่นน้อยที่สุด" ในกลุ่มคนโสดด้วยกันเท่านั้น
+                    let minCandidatePlay = playerStats[candidates[0]] ? (playerStats[candidates[0]].played || 0) : 0;
+                    let bestCandidates = candidates.filter(c => {
+                        let cPlayed = playerStats[c] ? (playerStats[c].played || 0) : 0;
+                        return cPlayed === minCandidatePlay;
+                    });
+
+                    let bestP2 = bestCandidates[0];
+                    let minHist = Infinity;
+                    // เลือกคู่ที่ประวัติการเจอกันน้อยที่สุด
+                    for (let c of bestCandidates) {
+                        let htmlCount = historyPairs[p1][c] || 0;
+                        if (htmlCount < minHist) { minHist = htmlCount; bestP2 = c; }
+                    }
+                    return [p1, bestP2];
+                }
             }
         }
         
-        return [p1, bestP2];
+        // Fallback: หากหาคู่ไม่ได้จริงๆ
+        return pool.slice(0, 2);
     }
 
     function optimizeFourPlayers(pArr) {
