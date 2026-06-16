@@ -525,16 +525,17 @@
         eliminatedOrder = eliminatedOrder.filter(p => p !== playerName);
     }
 
+// 🌟 1. อัปเกรดลอจิกเลือกทีมหลัก ( selectTeam )
 function selectTeam(excludeList, reqCount = 2) {
     let rawPool = getAvailablePlayers(excludeList);
     
-    // 1. กรองคนที่คู่ล็อคไม่อยู่ในคิวออกไปก่อน
+    // กรองคนที่คู่ล็อคไม่อยู่ในคิวออกไปก่อน
     let validRawPool = rawPool.filter(p => !lockedPairs[p] || rawPool.includes(lockedPairs[p]));
     if (validRawPool.length < reqCount) {
         validRawPool = rawPool; 
     }
 
-    // 2. จัดเรียงคิว: "คนที่เล่นน้อยที่สุด" ต้องอยู่หัวแถว
+    // จัดเรียงคิว: "คนที่เล่นน้อยที่สุด" ต้องอยู่หัวแถว
     validRawPool.sort((a, b) => {
         let aPlayed = playerStats[a] ? (playerStats[a].played || 0) : 0;
         let bPlayed = playerStats[b] ? (playerStats[b].played || 0) : 0;
@@ -543,23 +544,20 @@ function selectTeam(excludeList, reqCount = 2) {
 
     let pool = validRawPool;
     
-    // 3. แยกกลุ่มคนที่ "กำลังพักอยู่" เพื่อไม่ให้ลงเตะติดกัน
+    // แยกกลุ่มคนที่ "กำลังพักอยู่" เพื่อไม่ให้ลงเตะติดกัน
     let restedPool = validRawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime !== globalMatchCounter);
     
     if (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1)) {
         pool = restedPool;
     }
 
-    // 🌟 4. [แก้ปัญหาคน 6 คน] ระบบป้องกันคู่ซ้ำ (Smart Anti-Silo)
-    // ถ้าโดนบังคับให้ดึงคนพัก 2 คน แล้วพบว่า "เคยคู่กันแล้ว"
+    // 🔥 [แก้ไขคน 6 คน] ระบบป้องกันคู่ซ้ำระลอกที่ 1 (Smart Anti-Silo)
     if (reqCount === 2 && pool.length === 2 && !lockedPairs[pool[0]] && !lockedPairs[pool[1]]) {
         if (historyPairs[pool[0]] && historyPairs[pool[0]][pool[1]] > 0) {
             let p1 = pool[0];
-            // หาคนที่เพิ่งแพ้มาช่วยสลับขั้ว
             let alternatives = validRawPool.filter(p => p !== p1 && p !== pool[1] && !lockedPairs[p]);
             
             if (alternatives.length > 0) {
-                // หาคนที่ไม่เคยคู่ p1 มากที่สุด
                 alternatives.sort((a, b) => (historyPairs[p1][a] || 0) - (historyPairs[p1][b] || 0));
                 
                 if (historyPairs[p1][alternatives[0]] === 0) {
@@ -568,14 +566,13 @@ function selectTeam(excludeList, reqCount = 2) {
                     
                     pool = [p1, injectedPlayer, swappedPlayer]; 
                     
-                    // แจ้งเตือนผู้เล่นว่าระบบทำการสลับให้
+                    // แจ้งเตือน Popup สีส้ม
                     let popup = document.createElement('div');
-                    popup.innerHTML = `🔀 <b>ระบบป้องกันคู่ซ้ำทำงาน!</b><br>ดึง <b>${injectedPlayer}</b> (ตีต่อ) สลับกับ <b>${swappedPlayer}</b> (พักยาว) เพื่อให้ทุกคนวนคู่กัน`;
+                    popup.innerHTML = `🔀 <b>ระบบป้องกันคู่ซ้ำทำงาน!</b><br>ดึง <b>${injectedPlayer}</b> (ตีต่อ) สลับกับ <b>${swappedPlayer}</b> (พักยาว) เพื่อสลับคู่ใหม่`;
                     popup.style.cssText = "position:fixed; top:20px; right:20px; background:#f59e0b; color:#fff; padding:15px; border-radius:8px; z-index:9999; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-size:14px; animation: fadeOut 5s forwards;";
                     document.body.appendChild(popup);
                     setTimeout(() => popup.remove(), 5000);
                     
-                    // ชดเชยสถานะพักให้แฟร์
                     if(playerStats[injectedPlayer]) playerStats[injectedPlayer].lastBenchTime = 0;
                     if(playerStats[swappedPlayer]) playerStats[swappedPlayer].lastBenchTime = globalMatchCounter;
                 }
@@ -586,7 +583,7 @@ function selectTeam(excludeList, reqCount = 2) {
     if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : validRawPool.slice(0, 1);
     if (pool.length < 2) return validRawPool.slice(0, 2); 
 
-    // 🌟 5. ไล่จัดทีม เน้น "คนที่ไม่เคยคู่กันเลย" มาเป็นอันดับแรก
+    // ไล่จัดทีม เน้น "คนที่ไม่เคยคู่กันเลย" มาเป็นอันดับแรก
     for (let i = 0; i < pool.length; i++) {
         let p1 = pool[i];
         
@@ -602,10 +599,8 @@ function selectTeam(excludeList, reqCount = 2) {
                 candidates.sort((a, b) => {
                     let histA = historyPairs[p1][a] || 0;
                     let histB = historyPairs[p1][b] || 0;
-                    // เอาคนที่ประวัติเจอกันน้อยสุดขึ้นก่อน
                     if (histA !== histB) return histA - histB; 
                     
-                    // ถ้าประวัติเท่ากัน ค่อยดูรอบที่เล่น
                     let playA = playerStats[a] ? (playerStats[a].played || 0) : 0;
                     let playB = playerStats[b] ? (playerStats[b].played || 0) : 0;
                     return playA - playB;
@@ -619,41 +614,52 @@ function selectTeam(excludeList, reqCount = 2) {
     return pool.slice(0, 2);
 }
 
-    function optimizeFourPlayers(pArr) {
-        if (!pArr || pArr.length !== 4) return { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] };
-        
-        const combinations = [
-            { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] },
-            { teamA: [pArr[0], pArr[2]], teamB: [pArr[1], pArr[3]] },
-            { teamA: [pArr[0], pArr[3]], teamB: [pArr[1], pArr[2]] }
-        ];
-        
-        let bestCombo = null;
-        let minWeight = Infinity;
-        
-        combinations.forEach(combo => {
-            let violatesLock = false;
-            combo.teamA.forEach(p => {
-                if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && lockedPairs[p] !== combo.teamA.find(x => x !== p)) violatesLock = true;
-            });
-            combo.teamB.forEach(p => {
-                if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && lockedPairs[p] !== combo.teamB.find(x => x !== p)) violatesLock = true;
-            });
-            
-            if (violatesLock) return;
-
-            const wA = (historyPairs[combo.teamA[0]] && historyPairs[combo.teamA[0]][combo.teamA[1]]) || 0;
-            const wB = (historyPairs[combo.teamB[0]] && historyPairs[combo.teamB[0]][combo.teamB[1]]) || 0;
-            const totalWeight = wA + wB;
-            
-            if (totalWeight < minWeight) {
-                minWeight = totalWeight;
-                bestCombo = combo;
-            }
+// 🌟 2. อัปเกรดลอจิกเกลี่ยทีมย่อย ( optimizeFourPlayers ) ตัวการทำบิ๊กลูปแตก!
+function optimizeFourPlayers(pArr) {
+    if (!pArr || pArr.length !== 4) return { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] };
+    
+    const combinations = [
+        { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] },
+        { teamA: [pArr[0], pArr[2]], teamB: [pArr[1], pArr[3]] },
+        { teamA: [pArr[0], pArr[3]], teamB: [pArr[1], pArr[2]] }
+    ];
+    
+    let bestCombo = null;
+    let minWeight = Infinity;
+    
+    combinations.forEach(combo => {
+        let violatesLock = false;
+        combo.teamA.forEach(p => {
+            if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && lockedPairs[p] !== combo.teamA.find(x => x !== p)) violatesLock = true;
+        });
+        combo.teamB.forEach(p => {
+            if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && lockedPairs[p] !== combo.teamB.find(x => x !== p)) violatesLock = true;
         });
         
-        return bestCombo || combinations[0];
-    }
+        if (violatesLock) return;
+
+        // ดึงประวัติการเจอกันมาคำนวณน้ำหนัก
+        const wA = (historyPairs[combo.teamA[0]] && historyPairs[combo.teamA[0]][combo.teamA[1]]) || 0;
+        const wB = (historyPairs[combo.teamB[0]] && historyPairs[combo.teamB[0]][combo.teamB[1]]) || 0;
+        
+        // 🔥 [จุดตายของคน 6 คน] ถ้าใครเคยคู่กันในประวัติมาแล้ว ให้บวกคะแนนความหนาแน่น (Penalty) เพิ่มเข้าไปเยอะๆ
+        // เพื่อป้องกันไม่ให้ระบบเลือกจัดคู่เดิมซ้ำเด็ดขาด ถ้ายังมีทางเลือกอื่นที่ดีกว่า
+        let penalty = 0;
+        if (players.length === 6) {
+            if (wA > 0) penalty += 50;
+            if (wB > 0) penalty += 50;
+        }
+
+        const totalWeight = wA + wB + penalty;
+        
+        if (totalWeight < minWeight) {
+            minWeight = totalWeight;
+            bestCombo = combo;
+        }
+    });
+    
+    return bestCombo || combinations[0];
+}
 
     function recordPartnerships(teamA, teamB) {
         if (teamA && teamA.p1 && teamA.p2) {

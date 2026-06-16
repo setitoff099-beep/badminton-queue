@@ -525,107 +525,141 @@
         eliminatedOrder = eliminatedOrder.filter(p => p !== playerName);
     }
 
+// 🌟 1. อัปเกรดลอจิกเลือกทีมหลัก ( selectTeam )
 function selectTeam(excludeList, reqCount = 2) {
-        let rawPool = getAvailablePlayers(excludeList);
-        
-        // 1. กรองคนที่คู่ล็อคไม่อยู่ในคิวออกไปก่อน
-        let validRawPool = rawPool.filter(p => !lockedPairs[p] || rawPool.includes(lockedPairs[p]));
-        if (validRawPool.length < reqCount) {
-            validRawPool = rawPool; 
-        }
+    let rawPool = getAvailablePlayers(excludeList);
+    
+    // กรองคนที่คู่ล็อคไม่อยู่ในคิวออกไปก่อน
+    let validRawPool = rawPool.filter(p => !lockedPairs[p] || rawPool.includes(lockedPairs[p]));
+    if (validRawPool.length < reqCount) {
+        validRawPool = rawPool; 
+    }
 
-        // 2. จัดเรียงคิว: "คนที่เล่นน้อยที่สุด" ต้องอยู่หัวแถวเสมอ
-        validRawPool.sort((a, b) => {
-            let aPlayed = playerStats[a] ? (playerStats[a].played || 0) : 0;
-            let bPlayed = playerStats[b] ? (playerStats[b].played || 0) : 0;
-            return aPlayed - bPlayed; 
-        });
+    // จัดเรียงคิว: "คนที่เล่นน้อยที่สุด" ต้องอยู่หัวแถว
+    validRawPool.sort((a, b) => {
+        let aPlayed = playerStats[a] ? (playerStats[a].played || 0) : 0;
+        let bPlayed = playerStats[b] ? (playerStats[b].played || 0) : 0;
+        return aPlayed - bPlayed; 
+    });
 
-        let pool = validRawPool;
-        
-        // 3. แยกกลุ่มคนที่ "กำลังพักอยู่" เพื่อไม่ให้ลงเตะติดกัน
-        let restedPool = validRawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime !== globalMatchCounter);
-        
-        if (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1)) {
-            pool = restedPool;
-        }
+    let pool = validRawPool;
+    
+    // แยกกลุ่มคนที่ "กำลังพักอยู่" เพื่อไม่ให้ลงเตะติดกัน
+    let restedPool = validRawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime !== globalMatchCounter);
+    
+    if (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1)) {
+        pool = restedPool;
+    }
 
-        if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : validRawPool.slice(0, 1);
-        if (pool.length < 2) return validRawPool.slice(0, 2); 
-
-        // 🌟 4. [ลอจิกใหม่] ไล่จัดทีมจาก "หัวคิว" (คนที่เล่นน้อยสุด) ลงมาเท่านั้น ห้ามข้ามคิว!
-        for (let i = 0; i < pool.length; i++) {
-            let p1 = pool[i];
+    // 🔥 [แก้ไขคน 6 คน] ระบบป้องกันคู่ซ้ำระลอกที่ 1 (Smart Anti-Silo)
+    if (reqCount === 2 && pool.length === 2 && !lockedPairs[pool[0]] && !lockedPairs[pool[1]]) {
+        if (historyPairs[pool[0]] && historyPairs[pool[0]][pool[1]] > 0) {
+            let p1 = pool[0];
+            let alternatives = validRawPool.filter(p => p !== p1 && p !== pool[1] && !lockedPairs[p]);
             
-            // กรณีที่คนหัวคิว "มีคู่ล็อค"
-            if (lockedPairs[p1]) {
-                let lp = lockedPairs[p1];
-                if (validRawPool.includes(lp)) {
-                    return [p1, lp]; 
-                }
-            } 
-            // กรณีที่คนหัวคิว "ไม่มีคู่ล็อค" (เช่น ลุงจ้อย ฟ่า เก้น)
-            else {
-                let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
-                if (candidates.length > 0) {
-                    // บังคับให้ต้องจับคู่กับคนที่ "เล่นน้อยที่สุด" ในกลุ่มคนโสดด้วยกันเท่านั้น
-                    let minCandidatePlay = playerStats[candidates[0]] ? (playerStats[candidates[0]].played || 0) : 0;
-                    let bestCandidates = candidates.filter(c => {
-                        let cPlayed = playerStats[c] ? (playerStats[c].played || 0) : 0;
-                        return cPlayed === minCandidatePlay;
-                    });
-
-                    let bestP2 = bestCandidates[0];
-                    let minHist = Infinity;
-                    // เลือกคู่ที่ประวัติการเจอกันน้อยที่สุด
-                    for (let c of bestCandidates) {
-                        let htmlCount = historyPairs[p1][c] || 0;
-                        if (htmlCount < minHist) { minHist = htmlCount; bestP2 = c; }
-                    }
-                    return [p1, bestP2];
+            if (alternatives.length > 0) {
+                alternatives.sort((a, b) => (historyPairs[p1][a] || 0) - (historyPairs[p1][b] || 0));
+                
+                if (historyPairs[p1][alternatives[0]] === 0) {
+                    let injectedPlayer = alternatives[0];
+                    let swappedPlayer = pool[1];
+                    
+                    pool = [p1, injectedPlayer, swappedPlayer]; 
+                    
+                    // แจ้งเตือน Popup สีส้ม
+                    let popup = document.createElement('div');
+                    popup.innerHTML = `🔀 <b>ระบบป้องกันคู่ซ้ำทำงาน!</b><br>ดึง <b>${injectedPlayer}</b> (ตีต่อ) สลับกับ <b>${swappedPlayer}</b> (พักยาว) เพื่อสลับคู่ใหม่`;
+                    popup.style.cssText = "position:fixed; top:20px; right:20px; background:#f59e0b; color:#fff; padding:15px; border-radius:8px; z-index:9999; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-size:14px; animation: fadeOut 5s forwards;";
+                    document.body.appendChild(popup);
+                    setTimeout(() => popup.remove(), 5000);
+                    
+                    if(playerStats[injectedPlayer]) playerStats[injectedPlayer].lastBenchTime = 0;
+                    if(playerStats[swappedPlayer]) playerStats[swappedPlayer].lastBenchTime = globalMatchCounter;
                 }
             }
         }
-        
-        // Fallback: หากหาคู่ไม่ได้จริงๆ
-        return pool.slice(0, 2);
     }
 
-    function optimizeFourPlayers(pArr) {
-        if (!pArr || pArr.length !== 4) return { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] };
-        
-        const combinations = [
-            { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] },
-            { teamA: [pArr[0], pArr[2]], teamB: [pArr[1], pArr[3]] },
-            { teamA: [pArr[0], pArr[3]], teamB: [pArr[1], pArr[2]] }
-        ];
-        
-        let bestCombo = null;
-        let minWeight = Infinity;
-        
-        combinations.forEach(combo => {
-            let violatesLock = false;
-            combo.teamA.forEach(p => {
-                if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && lockedPairs[p] !== combo.teamA.find(x => x !== p)) violatesLock = true;
-            });
-            combo.teamB.forEach(p => {
-                if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && lockedPairs[p] !== combo.teamB.find(x => x !== p)) violatesLock = true;
-            });
-            
-            if (violatesLock) return;
+    if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : validRawPool.slice(0, 1);
+    if (pool.length < 2) return validRawPool.slice(0, 2); 
 
-            const wA = (historyPairs[combo.teamA[0]] && historyPairs[combo.teamA[0]][combo.teamA[1]]) || 0;
-            const wB = (historyPairs[combo.teamB[0]] && historyPairs[combo.teamB[0]][combo.teamB[1]]) || 0;
-            const totalWeight = wA + wB;
-            
-            if (totalWeight < minWeight) {
-                minWeight = totalWeight;
-                bestCombo = combo;
+    // ไล่จัดทีม เน้น "คนที่ไม่เคยคู่กันเลย" มาเป็นอันดับแรก
+    for (let i = 0; i < pool.length; i++) {
+        let p1 = pool[i];
+        
+        if (lockedPairs[p1]) {
+            let lp = lockedPairs[p1];
+            if (validRawPool.includes(lp)) {
+                return [p1, lp]; 
             }
+        } 
+        else {
+            let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
+            if (candidates.length > 0) {
+                candidates.sort((a, b) => {
+                    let histA = historyPairs[p1][a] || 0;
+                    let histB = historyPairs[p1][b] || 0;
+                    if (histA !== histB) return histA - histB; 
+                    
+                    let playA = playerStats[a] ? (playerStats[a].played || 0) : 0;
+                    let playB = playerStats[b] ? (playerStats[b].played || 0) : 0;
+                    return playA - playB;
+                });
+
+                return [p1, candidates[0]];
+            }
+        }
+    }
+    
+    return pool.slice(0, 2);
+}
+
+// 🌟 2. อัปเกรดลอจิกเกลี่ยทีมย่อย ( optimizeFourPlayers ) ตัวการทำบิ๊กลูปแตก!
+function optimizeFourPlayers(pArr) {
+    if (!pArr || pArr.length !== 4) return { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] };
+    
+    const combinations = [
+        { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] },
+        { teamA: [pArr[0], pArr[2]], teamB: [pArr[1], pArr[3]] },
+        { teamA: [pArr[0], pArr[3]], teamB: [pArr[1], pArr[2]] }
+    ];
+    
+    let bestCombo = null;
+    let minWeight = Infinity;
+    
+    combinations.forEach(combo => {
+        let violatesLock = false;
+        combo.teamA.forEach(p => {
+            if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && lockedPairs[p] !== combo.teamA.find(x => x !== p)) violatesLock = true;
+        });
+        combo.teamB.forEach(p => {
+            if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && lockedPairs[p] !== combo.teamB.find(x => x !== p)) violatesLock = true;
         });
         
-        return bestCombo || combinations[0];
-    }
+        if (violatesLock) return;
+
+        // ดึงประวัติการเจอกันมาคำนวณน้ำหนัก
+        const wA = (historyPairs[combo.teamA[0]] && historyPairs[combo.teamA[0]][combo.teamA[1]]) || 0;
+        const wB = (historyPairs[combo.teamB[0]] && historyPairs[combo.teamB[0]][combo.teamB[1]]) || 0;
+        
+        // 🔥 [จุดตายของคน 6 คน] ถ้าใครเคยคู่กันในประวัติมาแล้ว ให้บวกคะแนนความหนาแน่น (Penalty) เพิ่มเข้าไปเยอะๆ
+        // เพื่อป้องกันไม่ให้ระบบเลือกจัดคู่เดิมซ้ำเด็ดขาด ถ้ายังมีทางเลือกอื่นที่ดีกว่า
+        let penalty = 0;
+        if (players.length === 6) {
+            if (wA > 0) penalty += 50;
+            if (wB > 0) penalty += 50;
+        }
+
+        const totalWeight = wA + wB + penalty;
+        
+        if (totalWeight < minWeight) {
+            minWeight = totalWeight;
+            bestCombo = combo;
+        }
+    });
+    
+    return bestCombo || combinations[0];
+}
 
     function recordPartnerships(teamA, teamB) {
         if (teamA && teamA.p1 && teamA.p2) {
