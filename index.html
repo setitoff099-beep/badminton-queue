@@ -1446,27 +1446,35 @@ function optimizeFourPlayers(pArr) {
         }
 
     function restoreSnapshot(st) {
-        players = st.players || []; 
-        mainQueue = st.mainQueue || []; 
-        historyPairs = st.historyPairs || {};
-        eliminatedOrder = st.eliminatedOrder || []; 
-        matchHistory = st.matchHistory || []; 
-        playerStats = st.playerStats || {};
-        lockedPairs = st.lockedPairs || {}; 
-        numCourts = st.numCourts || 1; 
-        winScore = st.winScore || 21; 
-        maxChamps = st.maxChamps || 1; 
-        startTimeExact = st.startTimeExact || null;
-        startTimeCalculated = st.startTimeCalculated || null;
-        globalMatchCounter = st.globalMatchCounter || 0;
-        
-        courts = st.courts || [];
-        courts.forEach(c => {
-            if (c.winScore === undefined) c.winScore = winScore;
-            if (c.maxChamps === undefined) c.maxChamps = maxChamps;
-            if (c.isPaused === undefined) c.isPaused = false;
-        });
-    }
+            players = st.players || []; 
+            mainQueue = st.mainQueue || []; 
+            historyPairs = st.historyPairs || {};
+            eliminatedOrder = st.eliminatedOrder || []; 
+            matchHistory = st.matchHistory || []; 
+            playerStats = st.playerStats || {};
+            lockedPairs = st.lockedPairs || {}; 
+            numCourts = st.numCourts || 1; 
+            winScore = st.winScore || 21; 
+            maxChamps = st.maxChamps || 1; 
+            startTimeExact = st.startTimeExact || null;
+            startTimeCalculated = st.startTimeCalculated || null;
+            globalMatchCounter = st.globalMatchCounter || 0;
+            
+            // 🔥 เก็บข้อมูลคอร์ทเดิมในเครื่องเอาไว้ก่อนโดน Firebase ทับ
+            let oldCourts = courts;
+            
+            courts = st.courts || [];
+            courts.forEach((c, idx) => {
+                if (c.winScore === undefined) c.winScore = winScore;
+                if (c.maxChamps === undefined) c.maxChamps = maxChamps;
+                if (c.isPaused === undefined) c.isPaused = false;
+                
+                // 🔥 รักษาหน่วยความจำ "ย้อนผล" ของเครื่องตัวเองไว้ (ไม่โดนล้าง)
+                if (oldCourts[idx] && oldCourts[idx].stateBeforeFinishStr) {
+                    c.stateBeforeFinishStr = oldCourts[idx].stateBeforeFinishStr;
+                }
+            });
+        }
 
     window.restoreFromCloud = function(data) {
         restoreSnapshot(data);
