@@ -1460,7 +1460,7 @@ function optimizeFourPlayers(pArr) {
             startTimeCalculated = st.startTimeCalculated || null;
             globalMatchCounter = st.globalMatchCounter || 0;
             
-            // 🔥 เก็บข้อมูลคอร์ทเดิมในเครื่องเอาไว้ก่อนโดน Firebase ทับ
+            // 🔥 จุดสำคัญ: แอบเก็บข้อมูลคอร์ทที่มีปุ่มย้อนผลของเครื่องตัวเองเอาไว้ก่อนโดน Firebase ทับ
             let oldCourts = courts;
             
             courts = st.courts || [];
@@ -1469,7 +1469,7 @@ function optimizeFourPlayers(pArr) {
                 if (c.maxChamps === undefined) c.maxChamps = maxChamps;
                 if (c.isPaused === undefined) c.isPaused = false;
                 
-                // 🔥 รักษาหน่วยความจำ "ย้อนผล" ของเครื่องตัวเองไว้ (ไม่โดนล้าง)
+                // 🔥 รักษาหน่วยความจำ "ย้อนผล" ของเครื่องตัวเองไว้ (ไม่โดนล้างเวลาออนไลน์)
                 if (oldCourts[idx] && oldCourts[idx].stateBeforeFinishStr) {
                     c.stateBeforeFinishStr = oldCourts[idx].stateBeforeFinishStr;
                 }
