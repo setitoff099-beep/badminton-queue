@@ -182,7 +182,7 @@
                             </div>
                             <div class="time-inner-row">
                                 <label>🔴 กลับ:</label>
-                                <input type="time" class="player-leave-time" value="${defaultEndTime}" onchange="updateRowBillTime(${playerCount})">
+                                <input type="time" class="player-leave-time" value="${defaultEndTime}" onchange="this.dataset.manualLeave='true'; updateRowBillTime(${playerCount})">
                             </div>
                         </div>
                         <div class="calc-badge" id="billStartBadge_${playerCount}">กำลังคำนวณ...</div>
@@ -230,7 +230,7 @@
                 </div>
                 <div class="time-inner-row">
                     <label>🔴 กลับ:</label>
-                    <input type="time" class="player-leave-time" value="${defaultEndTime}" onchange="updateRowBillTime(${playerCount})">
+                    <input type="time" class="player-leave-time" value="${defaultEndTime}" onchange="this.dataset.manualLeave='true'; updateRowBillTime(${playerCount})">
                 </div>
             </div>
             <div class="calc-badge" id="billStartBadge_${playerCount}">กำลังคำนวณ...</div>
@@ -256,7 +256,9 @@
             row.id = `playerRow_${playerCount}`;
             row.querySelector('.player-no').innerText = playerCount;
             row.querySelector('.player-arrival-time').setAttribute('onchange', `updateRowBillTime(${playerCount})`);
-            row.querySelector('.player-leave-time').setAttribute('onchange', `updateRowBillTime(${playerCount})`);
+            // [แก้ไข] ใส่ this.dataset.manualLeave='true' กลับไปด้วย
+            // เดิม setAttribute ทับทำให้ manual-leave tracking หายหลังลบผู้เล่น
+            row.querySelector('.player-leave-time').setAttribute('onchange', `this.dataset.manualLeave='true'; updateRowBillTime(${playerCount})`);
             row.querySelector('.calc-badge').id = `billStartBadge_${playerCount}`;
             row.querySelector('.btn-del').setAttribute('onclick', `removePlayerRow(${playerCount})`);
         });
@@ -288,11 +290,13 @@
         if (diffStart < 0) diffStart = 0; 
         
         let startHourIndex = 0;
+        // [อธิบาย] มาช้าเกิน 40 นาที = ถือว่าพลาดชั่วโมงนั้น เริ่มนับจากชั่วโมงถัดไป
         if (diffStart > 40) {
             startHourIndex = Math.floor((diffStart - 41) / 60) + 1;
         }
         
         let diffEnd = leaveMins - courtStartMins;
+        // [อธิบาย] กลับก่อนชั่วโมงหมด 20 นาที = ไม่ต้องร่วมจ่ายชั่วโมงนั้น
         let endHourIndex = Math.ceil((diffEnd - 20) / 60);
 
         if (endHourIndex <= startHourIndex) endHourIndex = startHourIndex + 1; 
@@ -322,14 +326,17 @@
     }
 
     function updateAllRows() {
-        // [แก้ไข] อัปเดตเวลาเลิกเล่นของทุกคนให้ตรงกับชั่วโมงที่จองไว้ใหม่
         const defaultEndTime = getCourtEndTimeStr();
         const rows = document.querySelectorAll('#playersContainer .player-row');
         
         rows.forEach(row => {
             const leaveInput = row.querySelector('.player-leave-time');
-            leaveInput.value = defaultEndTime; // บังคับเปลี่ยนค่า input
-            
+            // อัปเดตเวลากลับเฉพาะแถวที่ยังไม่ได้ตั้งเองแล้ว
+            if (leaveInput.dataset.manualLeave !== 'true') {
+                leaveInput.value = defaultEndTime;
+            }
+            // [แก้ไข] คำนวณ badge ใหม่ "ทุกแถว" เสมอ ไม่ว่าจะ manualLeave หรือเปล่า
+            // เดิมที่ return ออกก่อน ทำให้ badge ไม่อัปเดตเมื่อเปลี่ยนเวลาเปิดคอร์ท
             const id = row.id.split('_')[1];
             updateRowBillTime(id);
         });
