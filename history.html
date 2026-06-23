@@ -2,10 +2,6 @@
 <html lang="th">
 <head>
 
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#3b82f6">
-    <link rel="apple-touch-icon" href="icon-192.png">
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ประวัติการเล่นย้อนหลัง</title>
@@ -64,8 +60,17 @@
     <script>
         function renderHistoryList() {
             const historyStr = localStorage.getItem('badminton_past_sessions');
-            const historyList = historyStr ? JSON.parse(historyStr) : [];
+            // [แก้ไข] .slice(0, 3) เพื่อให้แสดงแค่ 3 รอบล่าสุดจริงๆ ตามที่หัวข้อบอกไว้
+            const historyList = historyStr ? JSON.parse(historyStr).slice(0, 3) : [];
             const container = document.getElementById('historyListContainer');
+
+            // [แก้ไข] ป้องกัน XSS ด้วย escapeHTML ก่อนนำข้อมูลใส่ใน innerHTML
+            function escapeHTML(str) {
+                if (str === null || str === undefined) return '';
+                const div = document.createElement('div');
+                div.appendChild(document.createTextNode(String(str)));
+                return div.innerHTML;
+            }
 
             if (historyList.length === 0) {
                 container.innerHTML = `
@@ -79,10 +84,10 @@
             container.innerHTML = historyList.map(item => `
                 <div class="history-card">
                     <div class="history-details">
-                        <h3>รอบวันที่ ${item.date}</h3>
+                        <h3>รอบวันที่ ${escapeHTML(item.date)}</h3>
                         <div class="badge-group">
-                            <span class="badge badge-players">👥 ผู้เล่น ${item.playerCount} คน</span>
-                            <span class="badge badge-matches">🏸 ทั้งหมด ${item.matchCount} แมตช์</span>
+                            <span class="badge badge-players">👥 ผู้เล่น ${escapeHTML(item.playerCount)} คน</span>
+                            <span class="badge badge-matches">🏸 ทั้งหมด ${escapeHTML(item.matchCount)} แมตช์</span>
                         </div>
                     </div>
                     <button class="btn-delete" onclick="deleteHistory(${item.id})">🗑️ ลบประวัติ</button>
@@ -107,17 +112,6 @@
         // โหลดข้อมูลเมื่อเปิดหน้าเว็บ
         document.addEventListener('DOMContentLoaded', renderHistoryList);
     </script>
-
-    <script>
-            // สมัครใช้งาน Service Worker
-            if ('serviceWorker' in navigator) {
-                window.addEventListener('load', () => {
-                    navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('ServiceWorker ทำงานสำเร็จ!'))
-                    .catch(err => console.log('ServiceWorker มีปัญหา: ', err));
-                });
-            }
-        </script>
 
 </body>
 </html>

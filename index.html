@@ -315,6 +315,32 @@
     // --- เพิ่มโค้ดส่วนนี้ ---
     let cachedNextMatch = null;
 
+    // [แก้ไข] ป้องกัน XSS: แปลงอักขระพิเศษ HTML ก่อนนำไปแสดงผลใน innerHTML
+    function escapeHTML(str) {
+        if (str === null || str === undefined) return '';
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(String(str)));
+        return div.innerHTML;
+    }
+
+    // [แก้ไข] สุ่มลำดับแบบ Fisher-Yates ซึ่งถูกต้องและ uniform random จริง
+    function shuffleArray(arr) {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    }
+
+    // [แก้ไข] Hash PIN ด้วย SHA-256 ผ่าน Web Crypto API (ไม่เก็บรหัสดิบในโค้ด)
+    async function hashPIN(pin) {
+        const msgBuffer = new TextEncoder().encode(pin);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
     function clearPreviewCache() {
         cachedNextMatch = null;
         let previewBox = document.getElementById('nextUpPreviewBox');
@@ -481,7 +507,7 @@
                 }
             });
             
-            mainQueue = [...players].sort(() => 0.5 - Math.random());
+            mainQueue = shuffleArray(players); // [แก้ไข] ใช้ Fisher-Yates แทน sort() ที่ให้ผลลำเอียง
             
             document.getElementById('setupSection').classList.remove('active');
             document.getElementById('gameSection').classList.add('active');
@@ -1524,9 +1550,10 @@ function optimizeFourPlayers(pArr) {
             container.innerHTML = `<div style="text-align:center; padding:30px; color:#94a3b8; background:#f8fafc; border-radius:12px;">ยังไม่มีประวัติการเล่นย้อนหลัง</div>`;
             return;
         }
+        // [แก้ไข] ใช้ escapeHTML() ป้องกัน XSS ก่อนนำข้อมูลใส่ใน innerHTML
         container.innerHTML = historyList.map(item => `
             <div class="history-card" onclick="viewHistoryDetail(${item.id})">
-                <div class="history-info"><h4>รอบวันที่ ${item.date}</h4><p>👥 ผู้เล่นทั้งหมด: ${item.playerCount} คน | 🏸 ทั้งหมด: ${item.matchCount} แมตช์</p></div>
+                <div class="history-info"><h4>รอบวันที่ ${escapeHTML(item.date)}</h4><p>👥 ผู้เล่นทั้งหมด: ${escapeHTML(item.playerCount)} คน | 🏸 ทั้งหมด: ${escapeHTML(item.matchCount)} แมตช์</p></div>
                 <div onclick="event.stopPropagation();"><button class="btn-delete-hist" onclick="deleteHistory(${item.id})">🗑️ ลบ</button></div>
             </div>`).join('');
     }
@@ -1551,10 +1578,12 @@ function optimizeFourPlayers(pArr) {
         
         let pListHtml = (oldState.players || []).map(p => {
             let pStat = oldState.playerStats ? oldState.playerStats[p] : null;
-            return `<span class="tag" style="background:#e0f2fe; color:#0369a1; padding:6px 12px; margin:4px;">${p} (${pStat ? pStat.arrivalTime : '-'}น. | ตี ${pStat ? pStat.played : 0} ชนะ ${pStat ? pStat.wins : 0})</span>`;
+            // [แก้ไข] ใช้ escapeHTML() ป้องกัน XSS สำหรับชื่อผู้เล่นและสถิติ
+            return `<span class="tag" style="background:#e0f2fe; color:#0369a1; padding:6px 12px; margin:4px;">${escapeHTML(p)} (${escapeHTML(pStat ? pStat.arrivalTime : '-')}น. | ตี ${escapeHTML(pStat ? pStat.played : 0)} ชนะ ${escapeHTML(pStat ? pStat.wins : 0)})</span>`;
         }).join('') || 'ไม่มีรายชื่อผู้เล่น';
 
-        let matchLinesHtml = (oldState.matchHistory || []).map(m => `<div style="padding:8px 0; border-bottom:1px dashed #cbd5e1; font-size:13.5px; color:#334155;"><strong>[${m.courtName || 'Court'}]</strong> รอบที่ ${m.round}: ${m.result}</div>`).join('') || '<div style="color:#94a3b8; padding:10px 0;">ไม่มีประวัติการบันทึกแมตช์การแข่งขัน</div>';
+        // [แก้ไข] ใช้ escapeHTML() ป้องกัน XSS สำหรับชื่อคอร์ทและผลการแข่งขัน
+        let matchLinesHtml = (oldState.matchHistory || []).map(m => `<div style="padding:8px 0; border-bottom:1px dashed #cbd5e1; font-size:13.5px; color:#334155;"><strong>[${escapeHTML(m.courtName || 'Court')}]</strong> รอบที่ ${escapeHTML(m.round)}: ${escapeHTML(m.result)}</div>`).join('') || '<div style="color:#94a3b8; padding:10px 0;">ไม่มีประวัติการบันทึกแมตช์การแข่งขัน</div>';
 
         document.getElementById('historyDetailContent').innerHTML = `
             <div class="detail-section"><h5>👥 รายชื่อผู้เล่น & สถิติภาพรวม</h5><div style="display:flex; flex-wrap:wrap; margin-top:5px;">${pListHtml}</div></div>
@@ -1565,8 +1594,11 @@ function optimizeFourPlayers(pArr) {
 
     window.closeHistoryDetail = function() { document.getElementById('historyDetailModal').style.display = 'none'; }
 
-    const ADMIN_PIN = "1234";
-    let isAdminUnlocked = localStorage.getItem("adminUnlocked") === "true";
+    // [แก้ไข] เก็บเป็น SHA-256 hash แทนรหัสดิบ (hash ของ "1234")
+    // หากต้องการเปลี่ยน PIN ให้รัน: crypto.subtle.digest('SHA-256', new TextEncoder().encode('รหัสใหม่')) ใน Console
+    const ADMIN_PIN_HASH = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";
+    // [แก้ไข] ใช้ sessionStorage แทน localStorage เพื่อให้ reset ทุกครั้งที่ปิด tab
+    let isAdminUnlocked = sessionStorage.getItem("adminUnlocked") === "true";
 
     function updateLockStatus() {
         const protectedElements = document.querySelectorAll('.protected-btn');
@@ -1590,13 +1622,20 @@ function optimizeFourPlayers(pArr) {
         }
     }
 
-    document.getElementById('adminLockBtn').addEventListener('click', () => {
+    // [แก้ไข] ใช้ async เพื่อรอ hash และเปรียบเทียบแบบ hash ไม่ใช่ plaintext
+    document.getElementById('adminLockBtn').addEventListener('click', async () => {
         if (isAdminUnlocked) {
-            isAdminUnlocked = false; localStorage.setItem("adminUnlocked", "false"); updateLockStatus();
+            isAdminUnlocked = false; sessionStorage.setItem("adminUnlocked", "false"); updateLockStatus();
         } else {
-            const userInput = prompt("กรุณาใส่รหัสผ่าน PIN 4 หลักเพื่อเปิดโหมดกรรมการ:");
-            if (userInput === ADMIN_PIN) { isAdminUnlocked = true; localStorage.setItem("adminUnlocked", "true"); updateLockStatus(); } 
-            else if (userInput !== null) { alert("❌ รหัสผ่านไม่ถูกต้อง"); }
+            const userInput = prompt("กรุณาใส่รหัสผ่าน PIN เพื่อเปิดโหมดกรรมการ:");
+            if (userInput !== null) {
+                const inputHash = await hashPIN(userInput);
+                if (inputHash === ADMIN_PIN_HASH) {
+                    isAdminUnlocked = true; sessionStorage.setItem("adminUnlocked", "true"); updateLockStatus();
+                } else {
+                    alert("❌ รหัสผ่านไม่ถูกต้อง");
+                }
+            }
         }
     });
 

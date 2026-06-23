@@ -1,10 +1,6 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#3b82f6">
-    <link rel="apple-touch-icon" href="icon-192.png">
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -441,17 +437,6 @@
         document.getElementById('resultCard').scrollIntoView({ behavior: 'smooth' });
     }
 </script>
-
-<script>
-        // สมัครใช้งาน Service Worker
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                .then(reg => console.log('ServiceWorker ทำงานสำเร็จ!'))
-                .catch(err => console.log('ServiceWorker มีปัญหา: ', err));
-            });
-        }
-    </script>
 
 </body>
 </html>
