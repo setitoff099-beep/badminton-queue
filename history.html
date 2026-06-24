@@ -102,8 +102,8 @@
             if (!historyStr) return;
 
             let historyList = JSON.parse(historyStr);
-            // กรองเอาตัวที่ไอดีไม่ตรงออกไปเพื่อลบ
-            historyList = historyList.filter(item => item.id !== id);
+            // [แก้ไข] ใช้ Number() ทั้งสองฝั่งเพื่อป้องกัน type mismatch (string "123" !== number 123)
+            historyList = historyList.filter(item => Number(item.id) !== Number(id));
             
             localStorage.setItem('badminton_past_sessions', JSON.stringify(historyList));
             renderHistoryList();

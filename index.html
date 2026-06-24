@@ -1695,9 +1695,40 @@ function optimizeFourPlayers(pArr) {
     const db = getDatabase(app);
     const dbRef = ref(db, 'badminton/tournamentState');
 
-    window.saveToCloud = function(stateStr) { set(dbRef, JSON.parse(stateStr)); };
-    window.clearCloudData = function() { remove(dbRef).then(() => { window.location.href = 'index.html'; }); };
-    onValue(dbRef, (snapshot) => { if (snapshot.val() && window.restoreFromCloud) window.restoreFromCloud(snapshot.val()); });
+    window.saveToCloud = function(stateStr) {
+        set(dbRef, JSON.parse(stateStr))
+            .then(() => {
+                _setCloudStatus('online');
+            })
+            .catch((err) => {
+                console.error('Firebase save error:', err);
+                _setCloudStatus('error');
+            });
+    };
+    window.clearCloudData = function() {
+        remove(dbRef)
+            .then(() => { window.location.href = 'index.html'; })
+            .catch((err) => { console.error('Firebase clear error:', err); alert('เกิดข้อผิดพลาดในการล้างข้อมูลบน Cloud กรุณาลองใหม่อีกครั้ง'); });
+    };
+    onValue(dbRef, (snapshot) => {
+        if (snapshot.val() && window.restoreFromCloud) window.restoreFromCloud(snapshot.val());
+    }, (err) => {
+        console.error('Firebase listen error:', err);
+        _setCloudStatus('error');
+    });
+
+    // อัปเดต indicator 🟢/🔴 บน top-nav ให้สะท้อนสถานะ sync จริงๆ
+    function _setCloudStatus(status) {
+        const el = document.querySelector('.top-nav span[style*="color"]');
+        if (!el) return;
+        if (status === 'online') {
+            el.textContent = '🟢 ออนไลน์';
+            el.style.color = '#10b981';
+        } else {
+            el.textContent = '🔴 sync ล้มเหลว';
+            el.style.color = '#ef4444';
+        }
+    }
 </script>
 
 </body>

@@ -182,7 +182,7 @@
                     div.id = `playerRow_${playerCount}`;
                     div.innerHTML = `
                         <div class="player-no">${playerCount}</div>
-                        <input type="text" class="player-name-input" placeholder="ชื่อผู้เล่นคนที่ ${playerCount}" value="${pName}">
+                        <input type="text" class="player-name-input" placeholder="ชื่อผู้เล่นคนที่ ${playerCount}" value="${escapeHTML(pName)}">
                         <div class="player-time-box">
                             <div class="time-inner-row">
                                 <label>🟢 มาถึง:</label>
