@@ -60,8 +60,8 @@
     <script>
         function renderHistoryList() {
             const historyStr = localStorage.getItem('badminton_past_sessions');
-            // [แก้ไข] .slice(0, 3) เพื่อให้แสดงแค่ 3 รอบล่าสุดจริงๆ ตามที่หัวข้อบอกไว้
-            const historyList = historyStr ? JSON.parse(historyStr).slice(0, 3) : [];
+            // จำนวนรอบที่แสดงถูกจำกัดไว้ตั้งแต่ตอนบันทึกแล้ว (MAX_HISTORY=3 ใน index.html) จึงแสดงทั้งหมดได้เลย
+            const historyList = historyStr ? JSON.parse(historyStr) : [];
             const container = document.getElementById('historyListContainer');
 
             // [แก้ไข] ป้องกัน XSS ด้วย escapeHTML ก่อนนำข้อมูลใส่ใน innerHTML

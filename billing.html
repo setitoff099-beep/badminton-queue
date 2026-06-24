@@ -70,7 +70,7 @@
 
 <div class="container">
     <div class="top-header">
-        <button class="btn-back" onclick="window.history.back()">⬅️ กลับหน้าจัดคิว</button>
+        <button class="btn-back" onclick="window.location.href='index.html'">⬅️ กลับหน้าจัดคิว</button>
         <h2 class="header-title">💸 ระบบคำนวณค่าใช้จ่าย (Smart Billing)</h2>
         <div class="spacer"></div>
     </div>
@@ -141,6 +141,14 @@
 
 <script>
     let playerCount = 0;
+
+    // [แก้ไข] ป้องกัน XSS: แปลงอักขระพิเศษ HTML ก่อนนำไปแสดงผลใน innerHTML
+    function escapeHTML(str) {
+        if (str === null || str === undefined) return '';
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(String(str)));
+        return div.innerHTML;
+    }
 
     function getCourtEndTimeStr() {
         const startStr = document.getElementById('courtStartTime').value || "09:00";
@@ -419,7 +427,7 @@
 
             html += `
                 <tr>
-                    <td class="text-left" style="font-weight:bold;">${p.name}</td>
+                    <td class="text-left" style="font-weight:bold;">${escapeHTML(p.name)}</td>
                     <td><span style="background:#f1f5f9; padding:4px 10px; border-radius:6px; font-weight:bold; color:#0369a1;">${p.playedHoursCount} ชม.</span></td>
                     <td class="text-right">${p.courtFee.toFixed(2)}</td>
                     <td class="text-right">${p.shuttleFee.toFixed(2)}</td>

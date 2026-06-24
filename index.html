@@ -119,6 +119,9 @@
 <div class="container">
     <div id="setupSection" class="setup-section active">
         <h1>ระบบจัดคิวแบดมินตัน v2.2 (Online)</h1>
+        <div id="singleModeBanner" style="display:none; background:#fef3c7; border:1px solid #fde68a; border-radius:8px; padding:10px 15px; margin-bottom:16px; color:#92400e; font-size:14px; font-weight:bold;">
+            ⚡ โหมด 1 แชมป์ — ระบบจะบังคับให้แชมป์ลงแข่งได้ครั้งเดียวแล้วต้องลงมาพักเสมอ
+        </div>
         <div class="form-group">
             <label>1. จำนวนคอร์ทที่เปิดเล่น:</label>
             <select id="numCourtsSetting">
@@ -138,7 +141,7 @@
             <label>3. คะแนนชนะในแต่ละเกม (เริ่มต้น):</label>
             <input type="number" id="winScore" value="21" min="1">
         </div>
-        <div class="form-group">
+        <div class="form-group" id="maxChampsGroup">
             <label>4. เป็นแชมป์ติดต่อกันได้สูงสุด (ครั้ง):</label>
             <input type="number" id="maxChamps" value="1" min="1">
         </div>
@@ -312,6 +315,13 @@
     let startTimeCalculated = null;
     let globalMatchCounter = 0;
 
+    // จำนวนรอบสูงสุดที่เก็บในประวัติ (ใช้ค่าเดียวกันทั้ง index.html และ history.html)
+    const MAX_HISTORY = 3;
+
+    // ตรวจสอบ URL parameter: ?mode=single → จำกัดแชมป์ 1 สมัย
+    const _urlParams = new URLSearchParams(window.location.search);
+    const _isSingleMode = _urlParams.get('mode') === 'single';
+
     // --- เพิ่มโค้ดส่วนนี้ ---
     let cachedNextMatch = null;
 
@@ -345,6 +355,15 @@
         cachedNextMatch = null;
         let previewBox = document.getElementById('nextUpPreviewBox');
         if (previewBox) previewBox.innerHTML = '';
+    }
+
+    // ฟังก์ชันกลางสำหรับแสดง popup แจ้งเตือน (ใช้แทนโค้ดซ้ำหลายจุด)
+    function showNotification(html, color = '#f59e0b') {
+        let popup = document.createElement('div');
+        popup.innerHTML = html;
+        popup.style.cssText = `position:fixed; top:20px; right:20px; background:${color}; color:#fff; padding:15px; border-radius:8px; z-index:9999; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-size:14px; animation: fadeOut 5s forwards;`;
+        document.body.appendChild(popup);
+        setTimeout(() => popup.remove(), 5000);
     }
     // ----------------------
 
@@ -487,6 +506,9 @@
             winScore = parseInt(document.getElementById('winScore').value) || 21;
             maxChamps = parseInt(document.getElementById('maxChamps').value) || 1;
             
+            // ถ้าเปิดด้วย ?mode=single ให้บังคับแชมป์ 1 สมัยเสมอ
+            if (_isSingleMode) maxChamps = 1;
+            
             const now = new Date();
             const h = String(now.getHours()).padStart(2, '0');
             const m = String(now.getMinutes()).padStart(2, '0');
@@ -593,11 +615,7 @@ function selectTeam(excludeList, reqCount = 2) {
                     pool = [p1, injectedPlayer, swappedPlayer]; 
                     
                     // แจ้งเตือน Popup สีส้ม
-                    let popup = document.createElement('div');
-                    popup.innerHTML = `🔀 <b>ระบบป้องกันคู่ซ้ำทำงาน!</b><br>ดึง <b>${injectedPlayer}</b> (ตีต่อ) สลับกับ <b>${swappedPlayer}</b> (พักยาว) เพื่อสลับคู่ใหม่`;
-                    popup.style.cssText = "position:fixed; top:20px; right:20px; background:#f59e0b; color:#fff; padding:15px; border-radius:8px; z-index:9999; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-size:14px; animation: fadeOut 5s forwards;";
-                    document.body.appendChild(popup);
-                    setTimeout(() => popup.remove(), 5000);
+                    showNotification(`🔀 <b>ระบบป้องกันคู่ซ้ำทำงาน!</b><br>ดึง <b>${injectedPlayer}</b> (ตีต่อ) สลับกับ <b>${swappedPlayer}</b> (พักยาว) เพื่อสลับคู่ใหม่`);
                     
                     if(playerStats[injectedPlayer]) playerStats[injectedPlayer].lastBenchTime = 0;
                     if(playerStats[swappedPlayer]) playerStats[swappedPlayer].lastBenchTime = globalMatchCounter;
@@ -931,11 +949,7 @@ function optimizeFourPlayers(pArr) {
                         if (waitP && justP) {
                             playerStats[justP].lastBenchTime = 0; 
                             playerStats[waitP].lastBenchTime = globalMatchCounter; 
-                            let popup = document.createElement('div');
-                            popup.innerHTML = `🔀 <b>ระบบทลายกลุ่มปิด (Silo) ทำงาน!</b><br>ดึง <b>${justP}</b> (ตีต่อ) สลับกับ <b>${waitP}</b> (ได้พักต่อ)`;
-                            popup.style.cssText = "position:fixed; top:20px; right:20px; background:#f59e0b; color:#fff; padding:15px; border-radius:8px; z-index:9999; box-shadow:0 4px 6px rgba(0,0,0,0.1); font-size:14px;";
-                            document.body.appendChild(popup);
-                            setTimeout(() => popup.remove(), 4000);
+                            showNotification(`🔀 <b>ระบบทลายกลุ่มปิด (Silo) ทำงาน!</b><br>ดึง <b>${justP}</b> (ตีต่อ) สลับกับ <b>${waitP}</b> (ได้พักต่อ)`);
                             clearPreviewCache(); // ล้างแคชทิ้งถ้า Silo Breaker ทำงาน
                         }
                     }
@@ -1179,6 +1193,8 @@ function optimizeFourPlayers(pArr) {
         let minPlayed = players.length > 0 ? Math.min(...players.map(p => playerStats[p].played)) : 0;
         let timeNow = getCurrentTimeStr();
 
+        // [หมายเหตุ] ตั้ง played เท่ากับ minPlayed เพื่อให้ระบบดึงคนใหม่ลงสนามก่อน
+        // wins/losses ตั้งเป็น 0 ไว้ก่อน เพราะยังไม่มีประวัติการแข่ง (Win Rate จะถูกต้องหลังแข่งครั้งแรก)
         players.push(name); historyPairs[name] = {}; 
         playerStats[name] = { played: minPlayed, wins: 0, losses: 0, arrivalTime: timeNow, lastBenchTime: 0, onBreak: false };
         players.forEach(p => { if(p !== name) { if(!historyPairs[p]) historyPairs[p] = {}; historyPairs[p][name] = 0; historyPairs[name][p] = 0; } });
@@ -1524,7 +1540,7 @@ function optimizeFourPlayers(pArr) {
         let historyList = historyStr ? JSON.parse(historyStr) : [];
         let dateStr = new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
         historyList.unshift({ id: Date.now(), date: dateStr, matchCount: matchHistory.length, playerCount: players.length, snapshot: currentState }); 
-        if (historyList.length > 3) historyList = historyList.slice(0, 3); 
+        if (historyList.length > MAX_HISTORY) historyList = historyList.slice(0, MAX_HISTORY); 
         localStorage.setItem('badminton_past_sessions', JSON.stringify(historyList));
     }
 
@@ -1640,6 +1656,13 @@ function optimizeFourPlayers(pArr) {
     });
 
     document.addEventListener("DOMContentLoaded", () => {
+            // แสดง banner และซ่อน input maxChamps ถ้าเปิดด้วย ?mode=single
+            if (_isSingleMode) {
+                document.getElementById('singleModeBanner').style.display = 'block';
+                let maxChampsGroup = document.getElementById('maxChampsGroup');
+                if (maxChampsGroup) maxChampsGroup.style.display = 'none';
+            }
+
             let savedPlayers = sessionStorage.getItem('setup_players');
             if (savedPlayers) {
                 document.getElementById('playerInput').value = savedPlayers;
