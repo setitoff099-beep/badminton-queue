@@ -1578,7 +1578,7 @@ function optimizeFourPlayers(pArr) {
         if(!confirm('คุณแน่ใจหรือไม่ว่าต้องการลบประวัติการเล่นรอบนี้?')) return;
         let historyStr = localStorage.getItem('badminton_past_sessions');
         if(!historyStr) return;
-        let historyList = JSON.parse(historyStr).filter(item => item.id !== id);
+        let historyList = JSON.parse(historyStr).filter(item => Number(item.id) !== Number(id));
         localStorage.setItem('badminton_past_sessions', JSON.stringify(historyList));
         renderHistoryList(); 
     }
@@ -1586,7 +1586,7 @@ function optimizeFourPlayers(pArr) {
     window.viewHistoryDetail = function(id) {
         let historyStr = localStorage.getItem('badminton_past_sessions');
         if(!historyStr) return;
-        let selectedItem = JSON.parse(historyStr).find(item => item.id === id);
+        let selectedItem = JSON.parse(historyStr).find(item => Number(item.id) === Number(id));
         if(!selectedItem || !selectedItem.snapshot) return alert('ไม่พบข้อมูลรายละเอียดของรอบนี้');
 
         let oldState = JSON.parse(selectedItem.snapshot);
