@@ -963,15 +963,12 @@ function optimizeFourPlayers(pArr) {
                 }
 
                 let teamA, teamB;
-                // โหลด 4 คนจาก Cache ถ้ามี และกำลังเล่นคู่
-                if (cachedNextMatch && cachedNextMatch.fullMatch && req === 2) {
-                    let opt = cachedNextMatch.fullMatch;
-                    teamA = [opt.teamA[0], opt.teamA[1]];
-                    teamB = [opt.teamB[0], opt.teamB[1]];
-                } else {
-                    teamA = selectTeam([], req);
-                    teamB = selectTeam([...teamA], req);
-                }
+                // [แก้ไข Bug] ล้าง cache เสมอก่อนเลือกผู้เล่น
+                // เพราะ cache ถูกสร้างตอนแมตช์ยังไม่จบ ณ เวลานั้น lastBenchTime ของคนแพ้ยังไม่ถูก set
+                // หากใช้ cache ตรงๆ จะข้ามการกรอง restedPool ทำให้คนแพ้รอบล่าสุดถูกดึงลงสนามซ้ำได้
+                clearPreviewCache();
+                teamA = selectTeam([], req);
+                teamB = selectTeam([...teamA], req);
 
                 teamA.forEach(p => pullPlayer(p));
                 teamB.forEach(p => pullPlayer(p));
@@ -989,16 +986,10 @@ function optimizeFourPlayers(pArr) {
                 let excludeList = req === 1 ? [champTeam.p1] : [champTeam.p1, champTeam.p2];
                 
                 let challengers;
-                // โหลดผู้ท้าชิงจาก Cache ถ้ามี
-                if (cachedNextMatch && cachedNextMatch.challengers && req === 2) {
-                    challengers = cachedNextMatch.challengers;
-                    // เซฟตี้: เช็คว่าคนที่ถูกแคชไว้ไม่ใช่แชมป์เก่า
-                    if (challengers.includes(champTeam.p1) || (champTeam.p2 && challengers.includes(champTeam.p2))) {
-                        challengers = selectTeam(excludeList, req); 
-                    }
-                } else {
-                    challengers = selectTeam(excludeList, req);
-                }
+                // [แก้ไข Bug] ล้าง cache เสมอ เพราะ cache ถูกสร้างก่อน finishMatch set lastBenchTime
+                // ทำให้คนแพ้รอบล่าสุดอาจถูกดึงมาเป็นผู้ท้าชิงได้ทันที
+                clearPreviewCache();
+                challengers = selectTeam(excludeList, req);
 
                 challengers.forEach(p => pullPlayer(p));
                 
