@@ -593,7 +593,8 @@ function selectTeam(excludeList, reqCount = 2) {
     let pool = validRawPool;
     
     // แยกกลุ่มคนที่ "กำลังพักอยู่" เพื่อไม่ให้ลงเตะติดกัน
-    let restedPool = validRawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime !== globalMatchCounter);
+    // [แก้ไข] เช็ค lastBenchTime > globalMatchCounter เพื่อให้กรองคนแพ้รอบล่าสุดออกได้ถูกต้อง
+    let restedPool = validRawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime <= globalMatchCounter);
     
     if (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1)) {
         pool = restedPool;
@@ -618,7 +619,7 @@ function selectTeam(excludeList, reqCount = 2) {
                     showNotification(`🔀 <b>ระบบป้องกันคู่ซ้ำทำงาน!</b><br>ดึง <b>${injectedPlayer}</b> (ตีต่อ) สลับกับ <b>${swappedPlayer}</b> (พักยาว) เพื่อสลับคู่ใหม่`);
                     
                     if(playerStats[injectedPlayer]) playerStats[injectedPlayer].lastBenchTime = 0;
-                    if(playerStats[swappedPlayer]) playerStats[swappedPlayer].lastBenchTime = globalMatchCounter;
+                    if(playerStats[swappedPlayer]) playerStats[swappedPlayer].lastBenchTime = globalMatchCounter + 1;
                 }
             }
         }
@@ -888,7 +889,12 @@ function optimizeFourPlayers(pArr) {
         let loserArr = req === 1 ? [loser.p1] : [loser.p1, loser.p2];
         let winnerArr = req === 1 ? [winner.p1] : [winner.p1, winner.p2];
 
-        loserArr.forEach(p => { if (playerStats[p]) playerStats[p].lastBenchTime = globalMatchCounter; pushToEliminated(p); });
+        // [แก้ไข Bug] ใช้ globalMatchCounter + 1 เพื่อให้ selectTeam กรองคนแพ้ออกได้ถูกต้อง
+        // เหตุผล: selectTeam เช็ค lastBenchTime !== globalMatchCounter ณ เวลาที่เรียก
+        // แต่ตอนนั้น globalMatchCounter ยังเป็นค่าปัจจุบัน (ไม่ได้บวกเพิ่ม)
+        // หากบันทึก lastBenchTime = globalMatchCounter คนแพ้จะถูกมองว่า "พักแล้ว" แต่เช็คค่าไม่ตรง
+        // จึงต้องบันทึกล่วงหน้าเป็น globalMatchCounter + 1 ให้ตรงกับแมตช์ถัดไป
+        loserArr.forEach(p => { if (playerStats[p]) playerStats[p].lastBenchTime = globalMatchCounter + 1; pushToEliminated(p); });
 
         [...winnerArr, ...loserArr].forEach(p => playerStats[p].played++);
         winnerArr.forEach(p => playerStats[p].wins++);
@@ -911,7 +917,7 @@ function optimizeFourPlayers(pArr) {
         let isChampOut = false;
         if(court.currentChamp.count >= targetChamp) {
             isChampOut = true; champStatus = `(แชมป์ครบ ${targetChamp} สมัย)`;
-            winnerArr.forEach(p => { if (playerStats[p]) playerStats[p].lastBenchTime = globalMatchCounter; pushToEliminated(p); });
+            winnerArr.forEach(p => { if (playerStats[p]) playerStats[p].lastBenchTime = globalMatchCounter + 1; pushToEliminated(p); });
         } else { champStatus = `(แชมป์ ${court.currentChamp.count} สมัย)`; }
 
         let winText = req === 1 ? winner.p1 : (winner.p2 ? `${winner.p1}&${winner.p2}` : winner.p1);
@@ -944,11 +950,12 @@ function optimizeFourPlayers(pArr) {
                 // 🔧 [SILO BREAKER]
                 if (players.length === 8 && numCourts === 1 && court.matchType !== 'singles') {
                     if (globalMatchCounter % 3 === 0) {
-                        let waitP = eliminatedOrder.find(p => playerStats[p].lastBenchTime !== globalMatchCounter && !lockedPairs[p]);
-                        let justP = eliminatedOrder.find(p => playerStats[p].lastBenchTime === globalMatchCounter && !lockedPairs[p]);
+                        // [แก้ไข] เช็ค <= globalMatchCounter สอดคล้องกับ lastBenchTime ที่ปรับเป็น +1 แล้ว
+                        let waitP = eliminatedOrder.find(p => playerStats[p].lastBenchTime <= globalMatchCounter && !lockedPairs[p]);
+                        let justP = eliminatedOrder.find(p => playerStats[p].lastBenchTime > globalMatchCounter && !lockedPairs[p]);
                         if (waitP && justP) {
                             playerStats[justP].lastBenchTime = 0; 
-                            playerStats[waitP].lastBenchTime = globalMatchCounter; 
+                            playerStats[waitP].lastBenchTime = globalMatchCounter + 1; 
                             showNotification(`🔀 <b>ระบบทลายกลุ่มปิด (Silo) ทำงาน!</b><br>ดึง <b>${justP}</b> (ตีต่อ) สลับกับ <b>${waitP}</b> (ได้พักต่อ)`);
                             clearPreviewCache(); // ล้างแคชทิ้งถ้า Silo Breaker ทำงาน
                         }
