@@ -583,8 +583,12 @@ function selectTeam(excludeList, reqCount = 2) {
         validRawPool = rawPool; 
     }
 
-    // จัดเรียงคิว: "คนที่เล่นน้อยที่สุด" ต้องอยู่หัวแถว
+    // [แก้ไข] เรียงลำดับใหม่: คนที่พักนานกว่า (lastBenchTime น้อยกว่า) ต้องลงก่อน
+    // ถ้าพักเท่ากัน ให้ดู played (น้อยกว่า = ลงก่อน)
     validRawPool.sort((a, b) => {
+        let aBench = playerStats[a] ? (playerStats[a].lastBenchTime || 0) : 0;
+        let bBench = playerStats[b] ? (playerStats[b].lastBenchTime || 0) : 0;
+        if (aBench !== bBench) return aBench - bBench; // พักนานกว่า (ค่าน้อยกว่า) ขึ้นก่อน
         let aPlayed = playerStats[a] ? (playerStats[a].played || 0) : 0;
         let bPlayed = playerStats[b] ? (playerStats[b].played || 0) : 0;
         return aPlayed - bPlayed; 
@@ -592,8 +596,8 @@ function selectTeam(excludeList, reqCount = 2) {
 
     let pool = validRawPool;
     
-    // แยกกลุ่มคนที่ "กำลังพักอยู่" เพื่อไม่ให้ลงเตะติดกัน
-    // [แก้ไข] เช็ค lastBenchTime > globalMatchCounter เพื่อให้กรองคนแพ้รอบล่าสุดออกได้ถูกต้อง
+    // แยกกลุ่มคนที่ "พักแล้ว" (lastBenchTime < globalMatchCounter+1) ออกจากคนที่เพิ่งแพ้รอบนี้
+    // คนเพิ่งแพ้จะมี lastBenchTime = globalMatchCounter + 1 ซึ่งมากกว่า globalMatchCounter
     let restedPool = validRawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime <= globalMatchCounter);
     
     if (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1)) {
@@ -1545,7 +1549,12 @@ function optimizeFourPlayers(pArr) {
     function hardReset() {
         if(confirm('คุณต้องการจบการแข่งขันประจำวันนี้ และล้างข้อมูลทั้งหมดใช่หรือไม่?\n(ข้อมูลรอบนี้จะถูกบันทึกในประวัติย้อนหลังอัตโนมัติ)')) { 
             archiveCurrentSession(); 
-            if(window.clearCloudData) window.clearCloudData(); 
+            // [แก้ไข] ถ้า Firebase ยังไม่พร้อม ให้ redirect กลับหน้าหลักได้เสมอ
+            if(window.clearCloudData) {
+                window.clearCloudData();
+            } else {
+                window.location.href = 'index.html';
+            }
         }
     }
 
@@ -1704,9 +1713,11 @@ function optimizeFourPlayers(pArr) {
             });
     };
     window.clearCloudData = function() {
+        // [แก้ไข] ล้าง Firebase แล้ว redirect เสมอ ไม่ว่า Firebase จะสำเร็จหรือไม่
+        // ป้องกันปัญหากดจบแล้วค้างเพราะ Firebase error หรือเน็ตหลุด
         remove(dbRef)
-            .then(() => { window.location.href = 'index.html'; })
-            .catch((err) => { console.error('Firebase clear error:', err); alert('เกิดข้อผิดพลาดในการล้างข้อมูลบน Cloud กรุณาลองใหม่อีกครั้ง'); });
+            .catch((err) => { console.error('Firebase clear error (non-blocking):', err); })
+            .finally(() => { window.location.href = 'index.html'; });
     };
     onValue(dbRef, (snapshot) => {
         if (snapshot.val() && window.restoreFromCloud) window.restoreFromCloud(snapshot.val());
