@@ -632,24 +632,31 @@ function selectTeam(excludeList, reqCount = 2) {
     if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : validRawPool.slice(0, 1);
     if (pool.length < 2) return validRawPool.slice(0, 2); 
 
-    // ไล่จัดทีม เน้น "คนที่ไม่เคยคู่กันเลย" มาเป็นอันดับแรก
+    // [แก้ไข] จัดทีมโดยเน้น lastBenchTime เป็นหลักก่อนเสมอ
+    // pool ถูก sort ตาม lastBenchTime แล้ว → คนหัว pool = รอนานสุด = ลงก่อน
+    // หา p2 จาก pool เหมือนกัน (ไม่ดึงจาก validRawPool ที่อาจมีคนเพิ่งแพ้)
     for (let i = 0; i < pool.length; i++) {
         let p1 = pool[i];
         
         if (lockedPairs[p1]) {
             let lp = lockedPairs[p1];
-            if (validRawPool.includes(lp)) {
+            if (pool.includes(lp)) {
                 return [p1, lp]; 
             }
+            // ถ้าคู่ล็อคไม่อยู่ใน pool (เพิ่งแพ้) ให้ข้ามไปหาคนอื่นก่อน
         } 
         else {
+            // หา p2 จาก pool เท่านั้น เพื่อให้ lastBenchTime priority ยังคงอยู่
             let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
             if (candidates.length > 0) {
+                // เรียง candidates ตาม lastBenchTime ก่อน แล้ว tiebreak ด้วย historyPairs
                 candidates.sort((a, b) => {
-                    let histA = historyPairs[p1][a] || 0;
-                    let histB = historyPairs[p1][b] || 0;
+                    let aBench = playerStats[a] ? (playerStats[a].lastBenchTime || 0) : 0;
+                    let bBench = playerStats[b] ? (playerStats[b].lastBenchTime || 0) : 0;
+                    if (aBench !== bBench) return aBench - bBench;
+                    let histA = historyPairs[p1] ? (historyPairs[p1][a] || 0) : 0;
+                    let histB = historyPairs[p1] ? (historyPairs[p1][b] || 0) : 0;
                     if (histA !== histB) return histA - histB; 
-                    
                     let playA = playerStats[a] ? (playerStats[a].played || 0) : 0;
                     let playB = playerStats[b] ? (playerStats[b].played || 0) : 0;
                     return playA - playB;
