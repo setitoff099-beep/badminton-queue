@@ -1527,11 +1527,19 @@ function optimizeFourPlayers(pArr) {
         renderAll();
     };
 
-    function saveData() { if (window.saveToCloud) window.saveToCloud(createDeepSnapshot()); }
+    function saveData() {
+        let snapshot = createDeepSnapshot();
+        // [แก้ไข] เซฟลง localStorage ด้วยทุกครั้ง เพื่อให้โหลดได้ทันทีตอนรีโหลดหน้า ไม่ต้องรอ Firebase
+        localStorage.setItem('badminton_game_state', snapshot);
+        if (window.saveToCloud) window.saveToCloud(snapshot);
+    }
 
     function clearSavedData() {
-        if(confirm('ต้องการล้างข้อมูลเพื่อเริ่มตั้งค่าใหม่ทั้งหมดใช่หรือไม่? (ข้อมูลจะถูกลบในทุกเครื่อง)')) { 
+        if(confirm('ต้องการล้างข้อมูลเพื่อเริ่มตั้งค่าใหม่ทั้งหมดใช่หรือไม่? (ข้อมูลจะถูกลบในทุกเครื่อง)')) {
+            // [แก้ไข] ล้าง localStorage ด้วยเสมอ ไม่ใช่แค่ Firebase
+            localStorage.removeItem('badminton_game_state');
             if(window.clearCloudData) window.clearCloudData(); 
+            else window.location.href = 'index.html';
         }
     }
 
@@ -1548,8 +1556,9 @@ function optimizeFourPlayers(pArr) {
 
     function hardReset() {
         if(confirm('คุณต้องการจบการแข่งขันประจำวันนี้ และล้างข้อมูลทั้งหมดใช่หรือไม่?\n(ข้อมูลรอบนี้จะถูกบันทึกในประวัติย้อนหลังอัตโนมัติ)')) { 
-            archiveCurrentSession(); 
-            // [แก้ไข] ถ้า Firebase ยังไม่พร้อม ให้ redirect กลับหน้าหลักได้เสมอ
+            archiveCurrentSession();
+            // [แก้ไข] ล้าง localStorage ด้วยเสมอ ไม่ใช่แค่ Firebase
+            localStorage.removeItem('badminton_game_state');
             if(window.clearCloudData) {
                 window.clearCloudData();
             } else {
@@ -1668,6 +1677,23 @@ function optimizeFourPlayers(pArr) {
                 document.getElementById('singleModeBanner').style.display = 'block';
                 let maxChampsGroup = document.getElementById('maxChampsGroup');
                 if (maxChampsGroup) maxChampsGroup.style.display = 'none';
+            }
+
+            // [แก้ไข] โหลด state จาก localStorage ก่อนเลย ไม่ต้องรอ Firebase
+            // ป้องกันหน้าเด้งกลับ setup เมื่อรีโหลดและ Firebase โหลดช้า/ล้มเหลว
+            let savedState = localStorage.getItem('badminton_game_state');
+            if (savedState) {
+                try {
+                    restoreSnapshot(JSON.parse(savedState));
+                    if (players.length > 0) {
+                        document.getElementById('setupSection').classList.remove('active');
+                        document.getElementById('gameSection').classList.add('active');
+                        renderAll();
+                    }
+                } catch(e) {
+                    console.error('Failed to restore local state:', e);
+                    localStorage.removeItem('badminton_game_state');
+                }
             }
 
             let savedPlayers = sessionStorage.getItem('setup_players');
