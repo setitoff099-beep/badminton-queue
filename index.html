@@ -129,6 +129,10 @@
                 <option value="2">2 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 8 คน)</option>
                 <option value="3">3 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 12 คน)</option>
                 <option value="4">4 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 16 คน)</option>
+                <option value="5">5 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 20 คน)</option>
+                <option value="6">6 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 24 คน)</option>
+                <option value="7">7 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 28 คน)</option>
+                <option value="8">8 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 32 คน)</option>
             </select>
         </div>
         <div class="form-group">
@@ -382,6 +386,10 @@
                     <option value="2" ${numCourts==2?'selected':''}>2 สนาม</option>
                     <option value="3" ${numCourts==3?'selected':''}>3 สนาม</option>
                     <option value="4" ${numCourts==4?'selected':''}>4 สนาม</option>
+                    <option value="5" ${numCourts==5?'selected':''}>5 สนาม</option>
+                    <option value="6" ${numCourts==6?'selected':''}>6 สนาม</option>
+                    <option value="7" ${numCourts==7?'selected':''}>7 สนาม</option>
+                    <option value="8" ${numCourts==8?'selected':''}>8 สนาม</option>
                 </select>
                 <p style="font-size:12px; color:#0284c7; margin:5px 0 0 0;">(ถ้าลดคอร์ท คนในคอร์ทที่โดนปิดจะเด้งกลับเข้าคิว)</p>
             </div>
@@ -601,24 +609,6 @@ function selectTeam(excludeList, reqCount = 2) {
     let pool = (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1))
         ? restedPool : validRawPool;
 
-    // 🔥 Smart Anti-Silo (คน 6 คน)
-    if (reqCount === 2 && pool.length === 2 && !lockedPairs[pool[0]] && !lockedPairs[pool[1]]) {
-        if (historyPairs[pool[0]] && historyPairs[pool[0]][pool[1]] > 0) {
-            let p1 = pool[0];
-            let alternatives = validRawPool.filter(p => p !== p1 && p !== pool[1] && !lockedPairs[p]);
-            if (alternatives.length > 0) {
-                alternatives.sort((a, b) => (historyPairs[p1][a] || 0) - (historyPairs[p1][b] || 0));
-                if (historyPairs[p1][alternatives[0]] === 0) {
-                    let injectedPlayer = alternatives[0];
-                    let swappedPlayer = pool[1];
-                    pool = [p1, injectedPlayer, swappedPlayer];
-                    showNotification(`🔀 <b>ระบบป้องกันคู่ซ้ำทำงาน!</b><br>ดึง <b>${injectedPlayer}</b> (ตีต่อ) สลับกับ <b>${swappedPlayer}</b> (พักยาว) เพื่อสลับคู่ใหม่`);
-                    if(playerStats[injectedPlayer]) playerStats[injectedPlayer].lastBenchTime = 0;
-                    if(playerStats[swappedPlayer]) playerStats[swappedPlayer].lastBenchTime = globalMatchCounter + 1;
-                }
-            }
-        }
-    }
 
     if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : validRawPool.slice(0, 1);
 
@@ -641,7 +631,7 @@ function selectTeam(excludeList, reqCount = 2) {
             if (!validRawPool.includes(lp)) continue; // คู่ล็อคไม่อยู่ในคิวเลย → ข้าม
 
             // เช็กว่ามีคนไม่มีคู่ล็อคที่รอนานกว่าทั้งคู่นี้ไหม
-            // [แก้ไข Bug] เช็คจาก validRawPool ทั้งหมด ไม่ใช่แค่ pool (restedPool)
+            // เช็คจาก validRawPool ทั้งหมด ไม่ใช่แค่ pool (restedPool)
             // เพราะคนที่เพิ่งแพ้อาจยังไม่อยู่ใน restedPool แต่ก็รอนานกว่าคู่ล็อคได้
             let pairBench = Math.max(
                 playerStats[p1] ? (playerStats[p1].lastBenchTime || 0) : 0,
@@ -701,13 +691,11 @@ function optimizeFourPlayers(pArr) {
         { teamA: [pArr[0], pArr[3]], teamB: [pArr[1], pArr[2]] }
     ];
     
-    let bestCombo = null;
+    let bestCombos = [];
     let minWeight = Infinity;
     
     combinations.forEach(combo => {
         let violatesLock = false;
-        // [แก้ไข Bug] เงื่อนไขเดิมผิด: find(x => x !== p) คืนคนแรกที่ไม่ใช่ p ซึ่งอาจเป็นใครก็ได้
-        // ที่ถูกต้อง: ถ้า p มีคู่ล็อค และคู่ล็อคอยู่ใน pArr (มาด้วยกัน) แต่ไม่ได้อยู่ทีมเดียวกับ p → violates
         combo.teamA.forEach(p => {
             if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && !combo.teamA.includes(lockedPairs[p])) violatesLock = true;
         });
@@ -717,27 +705,30 @@ function optimizeFourPlayers(pArr) {
         
         if (violatesLock) return;
 
-        // ดึงประวัติการเจอกันมาคำนวณน้ำหนัก
         const wA = (historyPairs[combo.teamA[0]] && historyPairs[combo.teamA[0]][combo.teamA[1]]) || 0;
         const wB = (historyPairs[combo.teamB[0]] && historyPairs[combo.teamB[0]][combo.teamB[1]]) || 0;
         
-        // 🔥 [จุดตายของคน 6 คน] ถ้าใครเคยคู่กันในประวัติมาแล้ว ให้บวกคะแนนความหนาแน่น (Penalty) เพิ่มเข้าไปเยอะๆ
-        // เพื่อป้องกันไม่ให้ระบบเลือกจัดคู่เดิมซ้ำเด็ดขาด ถ้ายังมีทางเลือกอื่นที่ดีกว่า
+        // [แก้ไข] ใช้ penalty กับทุกจำนวนคน ไม่ใช่แค่ 6 คน
+        // เพื่อให้คู่หมุนเวียนสม่ำเสมอในทุก session
         let penalty = 0;
-        if (players.length === 6) {
-            if (wA > 0) penalty += 50;
-            if (wB > 0) penalty += 50;
-        }
+        if (wA > 0) penalty += 50;
+        if (wB > 0) penalty += 50;
 
         const totalWeight = wA + wB + penalty;
         
         if (totalWeight < minWeight) {
             minWeight = totalWeight;
-            bestCombo = combo;
+            bestCombos = [combo];
+        } else if (totalWeight === minWeight) {
+            // [แก้ไข] เมื่อ weight เท่ากัน ให้เก็บไว้ทุก combination แล้วสุ่มเลือก
+            // เดิมเลือก combination แรกเสมอ ทำให้คู่แข็งตัวไม่หมุน
+            bestCombos.push(combo);
         }
     });
     
-    return bestCombo || combinations[0];
+    if (bestCombos.length === 0) return combinations[0];
+    // สุ่มเลือกจาก combination ที่ดีที่สุดเท่ากัน
+    return bestCombos[Math.floor(Math.random() * bestCombos.length)];
 }
 
     function recordPartnerships(teamA, teamB) {
@@ -766,8 +757,16 @@ function optimizeFourPlayers(pArr) {
         courts.forEach((court) => {
             let req = (court.matchType === 'singles') ? 1 : 2;
             let teamA = selectTeam([], req);
+            // [แก้ไข] ถ้าไม่มีผู้เล่นพอสำหรับทีม A ให้ข้ามคอร์ทนี้ไป (กรณีคนคี่/คนน้อย)
+            if (!teamA || teamA.length < req || !teamA[0]) return;
+
             let teamB = selectTeam([...teamA], req);
-            
+            // [แก้ไข] ถ้าไม่มีผู้เล่นพอสำหรับทีม B ให้คืนคน teamA กลับคิวแล้วข้าม
+            if (!teamB || teamB.length < req || !teamB[0]) {
+                teamA.forEach(p => { if(!mainQueue.includes(p) && !eliminatedOrder.includes(p)) eliminatedOrder.unshift(p); });
+                return;
+            }
+
             teamA.forEach(p => pullPlayer(p));
             teamB.forEach(p => pullPlayer(p));
             
@@ -981,17 +980,16 @@ function optimizeFourPlayers(pArr) {
             if (data.isChampOut) {
                 court.currentChamp = null;
 
-                // 🔧 [SILO BREAKER]
-                if (players.length === 8 && numCourts === 1 && court.matchType !== 'singles') {
+                // 🔧 [SILO BREAKER] ทำงานกับทุกจำนวนคน ไม่ใช่แค่ 8 คน
+                if (numCourts === 1 && court.matchType !== 'singles') {
                     if (globalMatchCounter % 3 === 0) {
-                        // [แก้ไข] เช็ค <= globalMatchCounter สอดคล้องกับ lastBenchTime ที่ปรับเป็น +1 แล้ว
                         let waitP = eliminatedOrder.find(p => playerStats[p].lastBenchTime <= globalMatchCounter && !lockedPairs[p]);
                         let justP = eliminatedOrder.find(p => playerStats[p].lastBenchTime > globalMatchCounter && !lockedPairs[p]);
                         if (waitP && justP) {
                             playerStats[justP].lastBenchTime = 0; 
                             playerStats[waitP].lastBenchTime = globalMatchCounter + 1; 
                             showNotification(`🔀 <b>ระบบทลายกลุ่มปิด (Silo) ทำงาน!</b><br>ดึง <b>${justP}</b> (ตีต่อ) สลับกับ <b>${waitP}</b> (ได้พักต่อ)`);
-                            clearPreviewCache(); // ล้างแคชทิ้งถ้า Silo Breaker ทำงาน
+                            clearPreviewCache();
                         }
                     }
                 }
@@ -1003,6 +1001,13 @@ function optimizeFourPlayers(pArr) {
                 clearPreviewCache();
                 teamA = selectTeam([], req);
                 teamB = selectTeam([...teamA], req);
+
+                // [แก้ไข] ป้องกันกรณีคนคี่/คนไม่พอ
+                if (!teamA || !teamA[0] || !teamB || !teamB[0]) {
+                    court.isGameOver = false; court.scoreA = 0; court.scoreB = 0;
+                    court.teamA = null; court.teamB = null; court.isPaused = true;
+                    renderAll(); saveData(); return;
+                }
 
                 teamA.forEach(p => pullPlayer(p));
                 teamB.forEach(p => pullPlayer(p));
@@ -1024,6 +1029,13 @@ function optimizeFourPlayers(pArr) {
                 // ทำให้คนแพ้รอบล่าสุดอาจถูกดึงมาเป็นผู้ท้าชิงได้ทันที
                 clearPreviewCache();
                 challengers = selectTeam(excludeList, req);
+
+                // [แก้ไข] ป้องกันกรณีคนคี่/คนไม่พอสำหรับผู้ท้าชิง
+                if (!challengers || challengers.length < req || !challengers[0]) {
+                    court.isGameOver = false; court.scoreA = 0; court.scoreB = 0;
+                    court.isPaused = true;
+                    renderAll(); saveData(); return;
+                }
 
                 challengers.forEach(p => pullPlayer(p));
                 
@@ -1100,8 +1112,11 @@ function optimizeFourPlayers(pArr) {
                 court.teamA = { p1: tA[0] };
                 court.teamB = { p1: tB[0] };
             } else {
-                court.teamA = { p1: tA[0], p2: tA[1] };
-                court.teamB = { p1: tB[0], p2: tB[1] };
+                // [แก้ไข] ผ่าน optimizeFourPlayers เหมือนกับ prepareNextMatch
+                // เดิมไม่ผ่าน ทำให้คู่ไม่ถูก optimize และไม่เช็ค lockedPairs
+                let optimized = optimizeFourPlayers([...tA, ...tB]);
+                court.teamA = { p1: optimized.teamA[0], p2: optimized.teamA[1] };
+                court.teamB = { p1: optimized.teamB[0], p2: optimized.teamB[1] };
             }
         }
 
