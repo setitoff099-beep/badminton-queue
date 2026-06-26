@@ -652,9 +652,16 @@ function selectTeam(excludeList, reqCount = 2) {
 
         } else {
             // p1 ไม่มีคู่ล็อค → หา p2 ที่ไม่มีคู่ล็อคเช่นกัน
-            // [แก้ไข] ต้องกรองคนที่มีคู่ล็อคออกจาก candidates ทั้งหมด
-            // เพราะคนที่มีคู่ล็อคต้องได้เล่นกับคู่ล็อคของตัวเองเท่านั้น
+            // คนที่มีคู่ล็อคต้องได้เล่นกับคู่ล็อคของตัวเองเท่านั้น ห้ามเป็น p2 ของคนอื่น
             let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
+
+            // [แก้ไข Bug] ถ้าใน pool (restedPool) ไม่มีคู่ให้เลย (ทุกคนมีล็อค)
+            // ให้ขยายหาจาก validRawPool ซึ่งรวมคนที่เพิ่งแพ้ด้วย
+            // เพื่อให้คนที่ยังไม่เคยลงเล่น (เช่น แฮม) ได้มีคู่ลงสนาม
+            if (candidates.length === 0) {
+                candidates = validRawPool.filter(p => p !== p1 && !lockedPairs[p]);
+            }
+
             if (candidates.length > 0) {
                 candidates.sort((a, b) => {
                     let aBench = playerStats[a] ? (playerStats[a].lastBenchTime || 0) : 0;
