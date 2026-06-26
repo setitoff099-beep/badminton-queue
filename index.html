@@ -636,14 +636,18 @@ function selectTeam(excludeList, reqCount = 2) {
         if (lockedPairs[p1]) {
             // p1 มีคู่ล็อค → ต้องได้เล่นกับคู่ล็อคเท่านั้น
             let lp = lockedPairs[p1];
-            if (!pool.includes(lp)) continue; // คู่ล็อคยังไม่พร้อม → ข้าม
+            // [แก้ไข] เช็คจาก validRawPool ทั้งหมด ไม่ใช่แค่ pool (restedPool)
+            // เพราะคู่ล็อคอาจเพิ่งแพ้และอยู่นอก restedPool แต่ก็พร้อมลงได้
+            if (!validRawPool.includes(lp)) continue; // คู่ล็อคไม่อยู่ในคิวเลย → ข้าม
 
             // เช็กว่ามีคนไม่มีคู่ล็อคที่รอนานกว่าทั้งคู่นี้ไหม
+            // [แก้ไข Bug] เช็คจาก validRawPool ทั้งหมด ไม่ใช่แค่ pool (restedPool)
+            // เพราะคนที่เพิ่งแพ้อาจยังไม่อยู่ใน restedPool แต่ก็รอนานกว่าคู่ล็อคได้
             let pairBench = Math.max(
                 playerStats[p1] ? (playerStats[p1].lastBenchTime || 0) : 0,
                 playerStats[lp] ? (playerStats[lp].lastBenchTime || 0) : 0
             );
-            let hasMorePatient = pool.some(p =>
+            let hasMorePatient = validRawPool.some(p =>
                 !lockedPairs[p] && p !== p1 &&
                 (playerStats[p] ? (playerStats[p].lastBenchTime || 0) : 0) < pairBench
             );
