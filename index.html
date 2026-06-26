@@ -641,7 +641,22 @@ function selectTeam(excludeList, reqCount = 2) {
         if (lockedPairs[p1]) {
             let lp = lockedPairs[p1];
             if (pool.includes(lp)) {
-                return [p1, lp]; 
+                // [แก้ไข Bug] เช็กก่อนว่ามีคนรอนานกว่าคู่ล็อคนี้ไหม
+                // เดิม: return คู่ล็อคทันที ทำให้คนที่รอนานกว่า (เช่น ยังไม่เคยลงเล่น) ถูกข้ามเสมอ
+                let pairBench = Math.max(
+                    playerStats[p1] ? (playerStats[p1].lastBenchTime || 0) : 0,
+                    playerStats[lp] ? (playerStats[lp].lastBenchTime || 0) : 0
+                );
+                // ถ้ามีคนไม่มีคู่ล็อคที่รอนานกว่า (lastBenchTime น้อยกว่า) ให้ข้ามคู่ล็อคนี้ไปก่อน
+                let hasMorePatient = pool.some(p =>
+                    !lockedPairs[p] &&
+                    p !== p1 &&
+                    (playerStats[p] ? (playerStats[p].lastBenchTime || 0) : 0) < pairBench
+                );
+                if (!hasMorePatient) {
+                    return [p1, lp];
+                }
+                // มีคนรอนานกว่า → ข้ามไป loop ต่อเพื่อหาคนนั้น
             }
             // ถ้าคู่ล็อคไม่อยู่ใน pool (เพิ่งแพ้) ให้ข้ามไปหาคนอื่นก่อน
         } 
