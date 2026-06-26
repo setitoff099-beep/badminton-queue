@@ -695,11 +695,13 @@ function optimizeFourPlayers(pArr) {
     
     combinations.forEach(combo => {
         let violatesLock = false;
+        // [แก้ไข Bug] เงื่อนไขเดิมผิด: find(x => x !== p) คืนคนแรกที่ไม่ใช่ p ซึ่งอาจเป็นใครก็ได้
+        // ที่ถูกต้อง: ถ้า p มีคู่ล็อค และคู่ล็อคอยู่ใน pArr (มาด้วยกัน) แต่ไม่ได้อยู่ทีมเดียวกับ p → violates
         combo.teamA.forEach(p => {
-            if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && lockedPairs[p] !== combo.teamA.find(x => x !== p)) violatesLock = true;
+            if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && !combo.teamA.includes(lockedPairs[p])) violatesLock = true;
         });
         combo.teamB.forEach(p => {
-            if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && lockedPairs[p] !== combo.teamB.find(x => x !== p)) violatesLock = true;
+            if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && !combo.teamB.includes(lockedPairs[p])) violatesLock = true;
         });
         
         if (violatesLock) return;
