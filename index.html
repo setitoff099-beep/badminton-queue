@@ -662,6 +662,10 @@ function selectTeam(excludeList, reqCount = 2) {
         } 
         else {
             // หา p2 จาก pool เท่านั้น เพื่อให้ lastBenchTime priority ยังคงอยู่
+            // [แก้ไข Bug] กรองคนที่มีคู่ล็อคออกทั้งหมด ไม่ว่าจะเป็น p1 หรือ p2 ของคู่ล็อค
+            // เดิม: !lockedPairs[p] กรองแค่คนที่เป็น "ต้นทาง" ของล็อค
+            // แต่ระบบล็อคเก็บทั้งสองทิศ เช่น lockedPairs["จี"]="นนท์นี่" และ lockedPairs["นนท์นี่"]="จี"
+            // ดังนั้น !lockedPairs[p] ครอบทั้งสองฝั่งอยู่แล้ว แต่ fallback slice ด้านล่างไม่ได้กรอง
             let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
             if (candidates.length > 0) {
                 // เรียง candidates ตาม lastBenchTime ก่อน แล้ว tiebreak ด้วย historyPairs
@@ -682,7 +686,14 @@ function selectTeam(excludeList, reqCount = 2) {
         }
     }
     
-    return pool.slice(0, 2);
+    // [แก้ไข Bug] fallback เดิม pool.slice(0,2) ไม่สนใจ lockedPairs
+    // ทำให้คนที่ล็อคคู่ไว้ถูกดึงมาจับคู่กับคนอื่นได้เมื่อ loop หา candidates ไม่เจอ
+    // แก้: กรองเอาเฉพาะคนที่ไม่มีคู่ล็อค หรือคู่ล็อคอยู่ใน pool ด้วยกัน
+    let fallbackPool = pool.filter(p => !lockedPairs[p] || pool.includes(lockedPairs[p]));
+    if (fallbackPool.length >= 2) return fallbackPool.slice(0, 2);
+    return pool.filter(p => !lockedPairs[p]).slice(0, 2).concat(
+        pool.filter(p => !!lockedPairs[p]).slice(0, 2)
+    ).slice(0, 2);
 }
 
 // 🌟 2. อัปเกรดลอจิกเกลี่ยทีมย่อย ( optimizeFourPlayers ) ตัวการทำบิ๊กลูปแตก!
