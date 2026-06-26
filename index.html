@@ -576,52 +576,43 @@
 // 🌟 1. อัปเกรดลอจิกเลือกทีมหลัก ( selectTeam )
 function selectTeam(excludeList, reqCount = 2) {
     let rawPool = getAvailablePlayers(excludeList);
-    
-    // กรองคนที่คู่ล็อคไม่อยู่ในคิวออกไปก่อน
+
+    // ฟังก์ชันช่วย: เรียงผู้เล่นตาม lastBenchTime → played
+    function sortByPriority(arr) {
+        return [...arr].sort((a, b) => {
+            let aBench = playerStats[a] ? (playerStats[a].lastBenchTime || 0) : 0;
+            let bBench = playerStats[b] ? (playerStats[b].lastBenchTime || 0) : 0;
+            if (aBench !== bBench) return aBench - bBench;
+            let aPlayed = playerStats[a] ? (playerStats[a].played || 0) : 0;
+            let bPlayed = playerStats[b] ? (playerStats[b].played || 0) : 0;
+            return aPlayed - bPlayed;
+        });
+    }
+
+    // [แก้ไข] กรองคนที่มีคู่ล็อคแต่คู่ไม่อยู่ใน rawPool ออกก่อน
+    // เพื่อไม่ให้คนที่ล็อคคู่ถูกดึงมาเล่นโดยไม่มีคู่ของตัวเอง
     let validRawPool = rawPool.filter(p => !lockedPairs[p] || rawPool.includes(lockedPairs[p]));
-    if (validRawPool.length < reqCount) {
-        validRawPool = rawPool; 
-    }
+    if (validRawPool.length < reqCount) validRawPool = rawPool;
 
-    // [แก้ไข] เรียงลำดับใหม่: คนที่พักนานกว่า (lastBenchTime น้อยกว่า) ต้องลงก่อน
-    // ถ้าพักเท่ากัน ให้ดู played (น้อยกว่า = ลงก่อน)
-    validRawPool.sort((a, b) => {
-        let aBench = playerStats[a] ? (playerStats[a].lastBenchTime || 0) : 0;
-        let bBench = playerStats[b] ? (playerStats[b].lastBenchTime || 0) : 0;
-        if (aBench !== bBench) return aBench - bBench; // พักนานกว่า (ค่าน้อยกว่า) ขึ้นก่อน
-        let aPlayed = playerStats[a] ? (playerStats[a].played || 0) : 0;
-        let bPlayed = playerStats[b] ? (playerStats[b].played || 0) : 0;
-        return aPlayed - bPlayed; 
-    });
+    validRawPool = sortByPriority(validRawPool);
 
-    let pool = validRawPool;
-    
-    // แยกกลุ่มคนที่ "พักแล้ว" (lastBenchTime < globalMatchCounter+1) ออกจากคนที่เพิ่งแพ้รอบนี้
-    // คนเพิ่งแพ้จะมี lastBenchTime = globalMatchCounter + 1 ซึ่งมากกว่า globalMatchCounter
+    // แยก "พักพอ" กับ "เพิ่งแพ้"
     let restedPool = validRawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime <= globalMatchCounter);
-    
-    if (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1)) {
-        pool = restedPool;
-    }
+    let pool = (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1))
+        ? restedPool : validRawPool;
 
-    // 🔥 [แก้ไขคน 6 คน] ระบบป้องกันคู่ซ้ำระลอกที่ 1 (Smart Anti-Silo)
+    // 🔥 Smart Anti-Silo (คน 6 คน)
     if (reqCount === 2 && pool.length === 2 && !lockedPairs[pool[0]] && !lockedPairs[pool[1]]) {
         if (historyPairs[pool[0]] && historyPairs[pool[0]][pool[1]] > 0) {
             let p1 = pool[0];
             let alternatives = validRawPool.filter(p => p !== p1 && p !== pool[1] && !lockedPairs[p]);
-            
             if (alternatives.length > 0) {
                 alternatives.sort((a, b) => (historyPairs[p1][a] || 0) - (historyPairs[p1][b] || 0));
-                
                 if (historyPairs[p1][alternatives[0]] === 0) {
                     let injectedPlayer = alternatives[0];
                     let swappedPlayer = pool[1];
-                    
-                    pool = [p1, injectedPlayer, swappedPlayer]; 
-                    
-                    // แจ้งเตือน Popup สีส้ม
+                    pool = [p1, injectedPlayer, swappedPlayer];
                     showNotification(`🔀 <b>ระบบป้องกันคู่ซ้ำทำงาน!</b><br>ดึง <b>${injectedPlayer}</b> (ตีต่อ) สลับกับ <b>${swappedPlayer}</b> (พักยาว) เพื่อสลับคู่ใหม่`);
-                    
                     if(playerStats[injectedPlayer]) playerStats[injectedPlayer].lastBenchTime = 0;
                     if(playerStats[swappedPlayer]) playerStats[swappedPlayer].lastBenchTime = globalMatchCounter + 1;
                 }
@@ -630,70 +621,63 @@ function selectTeam(excludeList, reqCount = 2) {
     }
 
     if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : validRawPool.slice(0, 1);
-    if (pool.length < 2) return validRawPool.slice(0, 2); 
 
-    // [แก้ไข] จัดทีมโดยเน้น lastBenchTime เป็นหลักก่อนเสมอ
-    // pool ถูก sort ตาม lastBenchTime แล้ว → คนหัว pool = รอนานสุด = ลงก่อน
-    // หา p2 จาก pool เหมือนกัน (ไม่ดึงจาก validRawPool ที่อาจมีคนเพิ่งแพ้)
+    // [แก้ไข] fallback reqCount=2 ต้องกรอง lockedPairs ด้วย ไม่ใช่แค่ slice ตรงๆ
+    if (pool.length < 2) {
+        let fb = validRawPool.filter(p => !lockedPairs[p]);
+        if (fb.length >= 2) return fb.slice(0, 2);
+        return validRawPool.slice(0, 2);
+    }
+
+    // วน loop เลือก p1 ตามลำดับ priority
     for (let i = 0; i < pool.length; i++) {
         let p1 = pool[i];
-        
+
         if (lockedPairs[p1]) {
+            // p1 มีคู่ล็อค → ต้องได้เล่นกับคู่ล็อคเท่านั้น
             let lp = lockedPairs[p1];
-            if (pool.includes(lp)) {
-                // [แก้ไข Bug] เช็กก่อนว่ามีคนรอนานกว่าคู่ล็อคนี้ไหม
-                // เดิม: return คู่ล็อคทันที ทำให้คนที่รอนานกว่า (เช่น ยังไม่เคยลงเล่น) ถูกข้ามเสมอ
-                let pairBench = Math.max(
-                    playerStats[p1] ? (playerStats[p1].lastBenchTime || 0) : 0,
-                    playerStats[lp] ? (playerStats[lp].lastBenchTime || 0) : 0
-                );
-                // ถ้ามีคนไม่มีคู่ล็อคที่รอนานกว่า (lastBenchTime น้อยกว่า) ให้ข้ามคู่ล็อคนี้ไปก่อน
-                let hasMorePatient = pool.some(p =>
-                    !lockedPairs[p] &&
-                    p !== p1 &&
-                    (playerStats[p] ? (playerStats[p].lastBenchTime || 0) : 0) < pairBench
-                );
-                if (!hasMorePatient) {
-                    return [p1, lp];
-                }
-                // มีคนรอนานกว่า → ข้ามไป loop ต่อเพื่อหาคนนั้น
-            }
-            // ถ้าคู่ล็อคไม่อยู่ใน pool (เพิ่งแพ้) ให้ข้ามไปหาคนอื่นก่อน
-        } 
-        else {
-            // หา p2 จาก pool เท่านั้น เพื่อให้ lastBenchTime priority ยังคงอยู่
-            // [แก้ไข Bug] กรองคนที่มีคู่ล็อคออกทั้งหมด ไม่ว่าจะเป็น p1 หรือ p2 ของคู่ล็อค
-            // เดิม: !lockedPairs[p] กรองแค่คนที่เป็น "ต้นทาง" ของล็อค
-            // แต่ระบบล็อคเก็บทั้งสองทิศ เช่น lockedPairs["จี"]="นนท์นี่" และ lockedPairs["นนท์นี่"]="จี"
-            // ดังนั้น !lockedPairs[p] ครอบทั้งสองฝั่งอยู่แล้ว แต่ fallback slice ด้านล่างไม่ได้กรอง
+            if (!pool.includes(lp)) continue; // คู่ล็อคยังไม่พร้อม → ข้าม
+
+            // เช็กว่ามีคนไม่มีคู่ล็อคที่รอนานกว่าทั้งคู่นี้ไหม
+            let pairBench = Math.max(
+                playerStats[p1] ? (playerStats[p1].lastBenchTime || 0) : 0,
+                playerStats[lp] ? (playerStats[lp].lastBenchTime || 0) : 0
+            );
+            let hasMorePatient = pool.some(p =>
+                !lockedPairs[p] && p !== p1 &&
+                (playerStats[p] ? (playerStats[p].lastBenchTime || 0) : 0) < pairBench
+            );
+            if (!hasMorePatient) return [p1, lp];
+            // มีคนรอนานกว่า → ข้ามคู่ล็อคนี้ไปก่อน
+
+        } else {
+            // p1 ไม่มีคู่ล็อค → หา p2 ที่ไม่มีคู่ล็อคเช่นกัน
+            // [แก้ไข] ต้องกรองคนที่มีคู่ล็อคออกจาก candidates ทั้งหมด
+            // เพราะคนที่มีคู่ล็อคต้องได้เล่นกับคู่ล็อคของตัวเองเท่านั้น
             let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
             if (candidates.length > 0) {
-                // เรียง candidates ตาม lastBenchTime ก่อน แล้ว tiebreak ด้วย historyPairs
                 candidates.sort((a, b) => {
                     let aBench = playerStats[a] ? (playerStats[a].lastBenchTime || 0) : 0;
                     let bBench = playerStats[b] ? (playerStats[b].lastBenchTime || 0) : 0;
                     if (aBench !== bBench) return aBench - bBench;
                     let histA = historyPairs[p1] ? (historyPairs[p1][a] || 0) : 0;
                     let histB = historyPairs[p1] ? (historyPairs[p1][b] || 0) : 0;
-                    if (histA !== histB) return histA - histB; 
+                    if (histA !== histB) return histA - histB;
                     let playA = playerStats[a] ? (playerStats[a].played || 0) : 0;
                     let playB = playerStats[b] ? (playerStats[b].played || 0) : 0;
                     return playA - playB;
                 });
-
                 return [p1, candidates[0]];
             }
         }
     }
-    
-    // [แก้ไข Bug] fallback เดิม pool.slice(0,2) ไม่สนใจ lockedPairs
-    // ทำให้คนที่ล็อคคู่ไว้ถูกดึงมาจับคู่กับคนอื่นได้เมื่อ loop หา candidates ไม่เจอ
-    // แก้: กรองเอาเฉพาะคนที่ไม่มีคู่ล็อค หรือคู่ล็อคอยู่ใน pool ด้วยกัน
-    let fallbackPool = pool.filter(p => !lockedPairs[p] || pool.includes(lockedPairs[p]));
-    if (fallbackPool.length >= 2) return fallbackPool.slice(0, 2);
-    return pool.filter(p => !lockedPairs[p]).slice(0, 2).concat(
-        pool.filter(p => !!lockedPairs[p]).slice(0, 2)
-    ).slice(0, 2);
+
+    // fallback สุดท้าย: เอาคนไม่มีคู่ล็อคก่อน ถ้าไม่พอค่อยเอาคู่ล็อคที่พร้อม
+    let noLock = pool.filter(p => !lockedPairs[p]);
+    if (noLock.length >= 2) return noLock.slice(0, 2);
+    let readyPairs = pool.filter(p => lockedPairs[p] && pool.includes(lockedPairs[p]));
+    if (readyPairs.length >= 1) return [readyPairs[0], lockedPairs[readyPairs[0]]];
+    return pool.slice(0, 2);
 }
 
 // 🌟 2. อัปเกรดลอจิกเกลี่ยทีมย่อย ( optimizeFourPlayers ) ตัวการทำบิ๊กลูปแตก!
