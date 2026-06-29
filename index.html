@@ -1802,7 +1802,10 @@ function optimizeFourPlayers(pArr) {
     const dbRef = ref(db, 'badminton/tournamentState');
 
     window.saveToCloud = function(stateStr) {
-        set(dbRef, JSON.parse(stateStr))
+        // [แก้ไข] เซฟเป็น { data: "string" } แทนที่จะ JSON.parse แล้วเซฟเป็น object
+        // เพราะ Firebase ไม่อนุญาตให้ใช้ . $ # [ ] / ใน key
+        // และชื่อผู้เล่นถูกใช้เป็น key ใน historyPairs/playerStats → ถ้าชื่อมีจุดจะ reject ทั้งหมด
+        set(dbRef, { data: stateStr })
             .then(() => {
                 _setCloudStatus('online');
             })
@@ -1821,7 +1824,9 @@ function optimizeFourPlayers(pArr) {
     let _cloudInitialized = false;
 
     onValue(dbRef, (snapshot) => {
-        const cloudData = snapshot.val();
+        const val = snapshot.val();
+        // [แก้ไข] รับ { data: "string" } แล้ว parse กลับเป็น object ก่อนส่งไป restoreFromCloud
+        const cloudData = val && val.data ? JSON.parse(val.data) : null;
 
         if (cloudData && window.restoreFromCloud) {
             // Firebase มีข้อมูล → sync มาที่เครื่องนี้
@@ -1829,7 +1834,6 @@ function optimizeFourPlayers(pArr) {
         } else if (!cloudData && !_cloudInitialized) {
             // Firebase ว่างเปล่า + เชื่อมสำเร็จครั้งแรก
             // → ถ้าเครื่องนี้มีข้อมูลใน localStorage ให้ push ขึ้น Firebase ทันที
-            // (เกิดตอน rules เพิ่งได้รับการแก้ไข หรือเครื่องนี้เล่นก่อนจะออนไลน์)
             const localState = localStorage.getItem('badminton_game_state');
             if (localState && window.saveToCloud) {
                 window.saveToCloud(localState);
