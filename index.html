@@ -619,66 +619,73 @@ function selectTeam(excludeList, reqCount = 2) {
         return validRawPool.slice(0, 2);
     }
 
-    // วน loop เลือก p1 ตามลำดับ priority
-    for (let i = 0; i < pool.length; i++) {
-        let p1 = pool[i];
+    // --- Step 1: เช็คคู่ล็อค ---
+    // ถ้าไม่มีคนรอนานกว่าคู่ล็อค ให้คู่ล็อคลงได้เลย
+    for (let p1 of pool) {
+        if (!lockedPairs[p1]) continue;
+        let lp = lockedPairs[p1];
+        if (!validRawPool.includes(lp)) continue;
 
-        if (lockedPairs[p1]) {
-            // p1 มีคู่ล็อค → ต้องได้เล่นกับคู่ล็อคเท่านั้น
-            let lp = lockedPairs[p1];
-            // [แก้ไข] เช็คจาก validRawPool ทั้งหมด ไม่ใช่แค่ pool (restedPool)
-            // เพราะคู่ล็อคอาจเพิ่งแพ้และอยู่นอก restedPool แต่ก็พร้อมลงได้
-            if (!validRawPool.includes(lp)) continue; // คู่ล็อคไม่อยู่ในคิวเลย → ข้าม
+        let pairBench = Math.max(
+            playerStats[p1] ? (playerStats[p1].lastBenchTime || 0) : 0,
+            playerStats[lp] ? (playerStats[lp].lastBenchTime || 0) : 0
+        );
+        let hasMorePatient = validRawPool.some(p =>
+            !lockedPairs[p] && p !== p1 &&
+            (playerStats[p] ? (playerStats[p].lastBenchTime || 0) : 0) < pairBench
+        );
+        if (!hasMorePatient) return [p1, lp];
+    }
 
-            // เช็กว่ามีคนไม่มีคู่ล็อคที่รอนานกว่าทั้งคู่นี้ไหม
-            // เช็คจาก validRawPool ทั้งหมด ไม่ใช่แค่ pool (restedPool)
-            // เพราะคนที่เพิ่งแพ้อาจยังไม่อยู่ใน restedPool แต่ก็รอนานกว่าคู่ล็อคได้
-            let pairBench = Math.max(
-                playerStats[p1] ? (playerStats[p1].lastBenchTime || 0) : 0,
-                playerStats[lp] ? (playerStats[lp].lastBenchTime || 0) : 0
-            );
-            let hasMorePatient = validRawPool.some(p =>
-                !lockedPairs[p] && p !== p1 &&
-                (playerStats[p] ? (playerStats[p].lastBenchTime || 0) : 0) < pairBench
-            );
-            if (!hasMorePatient) return [p1, lp];
-            // มีคนรอนานกว่า → ข้ามคู่ล็อคนี้ไปก่อน
+    // --- Step 2: หาคู่ที่ดีที่สุดจาก pool (ไม่มีล็อค) ---
+    // [แก้ไข Bug หลัก] เดิม: เลือก p1 ที่พักนานสุด → หา p2 ที่ดีสุดสำหรับ p1
+    //   ปัญหา: p1 เดิมซ้ำทุกรอบ → เกิด Silo ถาวร (เจ๋ง&พี่กาย, ลุงจ้อย&พี่น้ำแข็ง)
+    // ใหม่: วนทุก combination จาก pool → เลือกคู่ที่มีคะแนนรวมต่ำสุด
+    //   Score = historyPairs * 20 + (bench_i + bench_j)
+    //   → คู่ที่ไม่เคยเล่นกัน (hist=0) ได้เปรียบมาก
+    //   → rest time ยังใช้เป็น tiebreaker เพื่อความยุติธรรม
+    let nonLockedPool = pool.filter(p => !lockedPairs[p]);
 
-        } else {
-            // p1 ไม่มีคู่ล็อค → หา p2 ที่ไม่มีคู่ล็อคเช่นกัน
-            // คนที่มีคู่ล็อคต้องได้เล่นกับคู่ล็อคของตัวเองเท่านั้น ห้ามเป็น p2 ของคนอื่น
-            let candidates = pool.filter(p => p !== p1 && !lockedPairs[p]);
+    // [แก้ไข] ถ้า nonLockedPool < 2 คน ให้ขยายหาจาก validRawPool ด้วย
+    // เพื่อป้องกัน fallback ที่อาจดึง locked player มาจับกับคนที่ไม่ใช่คู่ล็อค
+    if (nonLockedPool.length < 2) {
+        let extra = validRawPool.filter(p => !lockedPairs[p] && !nonLockedPool.includes(p));
+        nonLockedPool = [...nonLockedPool, ...extra];
+    }
 
-            // [แก้ไข Bug] ถ้าใน pool (restedPool) ไม่มีคู่ให้เลย (ทุกคนมีล็อค)
-            // ให้ขยายหาจาก validRawPool ซึ่งรวมคนที่เพิ่งแพ้ด้วย
-            // เพื่อให้คนที่ยังไม่เคยลงเล่น (เช่น แฮม) ได้มีคู่ลงสนาม
-            if (candidates.length === 0) {
-                candidates = validRawPool.filter(p => p !== p1 && !lockedPairs[p]);
+    if (nonLockedPool.length >= 2) {
+        let bestPairs = [];
+        let bestScore = Infinity;
+
+        for (let i = 0; i < nonLockedPool.length; i++) {
+            for (let j = i + 1; j < nonLockedPool.length; j++) {
+                let pi = nonLockedPool[i], pj = nonLockedPool[j];
+                let hist = (historyPairs[pi] && historyPairs[pi][pj]) || 0;
+                let bench_i = playerStats[pi] ? (playerStats[pi].lastBenchTime || 0) : 0;
+                let bench_j = playerStats[pj] ? (playerStats[pj].lastBenchTime || 0) : 0;
+                let score = hist * 20 + (bench_i + bench_j);
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestPairs = [[pi, pj]];
+                } else if (score === bestScore) {
+                    // [แก้ไข] เก็บคู่ที่ดีเท่ากันทุกคู่ แล้วสุ่มเลือก
+                    // เดิมเลือกคู่แรกในลูปเสมอ → คู่เดิมซ้ำแม้มีตัวเลือกที่ดีเท่ากัน
+                    bestPairs.push([pi, pj]);
+                }
             }
-
-            if (candidates.length > 0) {
-                candidates.sort((a, b) => {
-                    let aBench = playerStats[a] ? (playerStats[a].lastBenchTime || 0) : 0;
-                    let bBench = playerStats[b] ? (playerStats[b].lastBenchTime || 0) : 0;
-                    if (aBench !== bBench) return aBench - bBench;
-                    let histA = historyPairs[p1] ? (historyPairs[p1][a] || 0) : 0;
-                    let histB = historyPairs[p1] ? (historyPairs[p1][b] || 0) : 0;
-                    if (histA !== histB) return histA - histB;
-                    let playA = playerStats[a] ? (playerStats[a].played || 0) : 0;
-                    let playB = playerStats[b] ? (playerStats[b].played || 0) : 0;
-                    return playA - playB;
-                });
-                return [p1, candidates[0]];
-            }
+        }
+        if (bestPairs.length > 0) {
+            return bestPairs[Math.floor(Math.random() * bestPairs.length)];
         }
     }
 
-    // fallback สุดท้าย: เอาคนไม่มีคู่ล็อคก่อน ถ้าไม่พอค่อยเอาคู่ล็อคที่พร้อม
-    let noLock = pool.filter(p => !lockedPairs[p]);
+    // fallback สุดท้าย: ใช้ validRawPool เพื่อความปลอดภัย ไม่ใช่ pool
+    // ป้องกันการดึง locked player ไปจับกับคนที่ไม่ใช่คู่ล็อค
+    let noLock = validRawPool.filter(p => !lockedPairs[p]);
     if (noLock.length >= 2) return noLock.slice(0, 2);
-    let readyPairs = pool.filter(p => lockedPairs[p] && pool.includes(lockedPairs[p]));
+    let readyPairs = validRawPool.filter(p => lockedPairs[p] && validRawPool.includes(lockedPairs[p]));
     if (readyPairs.length >= 1) return [readyPairs[0], lockedPairs[readyPairs[0]]];
-    return pool.slice(0, 2);
+    return validRawPool.slice(0, 2);
 }
 
 // 🌟 2. อัปเกรดลอจิกเกลี่ยทีมย่อย ( optimizeFourPlayers ) ตัวการทำบิ๊กลูปแตก!
@@ -708,11 +715,11 @@ function optimizeFourPlayers(pArr) {
         const wA = (historyPairs[combo.teamA[0]] && historyPairs[combo.teamA[0]][combo.teamA[1]]) || 0;
         const wB = (historyPairs[combo.teamB[0]] && historyPairs[combo.teamB[0]][combo.teamB[1]]) || 0;
         
-        // [แก้ไข] ใช้ penalty กับทุกจำนวนคน ไม่ใช่แค่ 6 คน
-        // เพื่อให้คู่หมุนเวียนสม่ำเสมอในทุก session
+        // [แก้ไข] penalty scale ตาม history count ไม่ใช่แค่ flat 50
+        // ยิ่งเล่นด้วยกันบ่อย ยิ่งโดน penalty สูงขึ้น
         let penalty = 0;
-        if (wA > 0) penalty += 50;
-        if (wB > 0) penalty += 50;
+        if (wA > 0) penalty += 50 + wA * 5;
+        if (wB > 0) penalty += 50 + wB * 5;
 
         const totalWeight = wA + wB + penalty;
         
