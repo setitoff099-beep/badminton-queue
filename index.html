@@ -654,8 +654,9 @@ function selectTeam(excludeList, reqCount = 2) {
     }
 
     if (nonLockedPool.length >= 2) {
-        let bestPairs = [];
-        let bestScore = Infinity;
+        let freshPairs = [];    // คู่ที่ไม่เคยเล่นด้วยกัน (hist=0) → ต้องได้ลงก่อน
+        let bestUsedScore = Infinity;
+        let bestUsedPairs = [];  // คู่ที่เคยเล่นด้วยกันแล้ว → ใช้เมื่อไม่มีคู่ใหม่แล้ว
 
         for (let i = 0; i < nonLockedPool.length; i++) {
             for (let j = i + 1; j < nonLockedPool.length; j++) {
@@ -663,19 +664,31 @@ function selectTeam(excludeList, reqCount = 2) {
                 let hist = (historyPairs[pi] && historyPairs[pi][pj]) || 0;
                 let bench_i = playerStats[pi] ? (playerStats[pi].lastBenchTime || 0) : 0;
                 let bench_j = playerStats[pj] ? (playerStats[pj].lastBenchTime || 0) : 0;
-                let score = hist * 20 + (bench_i + bench_j);
-                if (score < bestScore) {
-                    bestScore = score;
-                    bestPairs = [[pi, pj]];
-                } else if (score === bestScore) {
-                    // [แก้ไข] เก็บคู่ที่ดีเท่ากันทุกคู่ แล้วสุ่มเลือก
-                    // เดิมเลือกคู่แรกในลูปเสมอ → คู่เดิมซ้ำแม้มีตัวเลือกที่ดีเท่ากัน
-                    bestPairs.push([pi, pj]);
+
+                if (hist === 0) {
+                    // [แก้ไข] คู่ใหม่ทุกคู่มีสิทธิ์เท่ากัน สุ่มเลือก
+                    // เดิมใช้ bench เป็น tiebreaker ทำให้คู่ใหม่ที่พักนานต่างกันนิดหน่อยไม่ถูกเลือก
+                    freshPairs.push([pi, pj]);
+                } else {
+                    let score = hist * 20 + (bench_i + bench_j);
+                    if (score < bestUsedScore) {
+                        bestUsedScore = score;
+                        bestUsedPairs = [[pi, pj]];
+                    } else if (score === bestUsedScore) {
+                        bestUsedPairs.push([pi, pj]);
+                    }
                 }
             }
         }
-        if (bestPairs.length > 0) {
-            return bestPairs[Math.floor(Math.random() * bestPairs.length)];
+
+        // Tier 1: คู่ใหม่ก่อนเสมอ (หลักสำคัญ: ทุกคนต้องคู่กันครบก่อนซ้ำ)
+        if (freshPairs.length > 0) {
+            return freshPairs[Math.floor(Math.random() * freshPairs.length)];
+        }
+
+        // Tier 2: ไม่มีคู่ใหม่แล้ว → เลือกคู่ที่เคยเล่นด้วยกันน้อยที่สุด
+        if (bestUsedPairs.length > 0) {
+            return bestUsedPairs[Math.floor(Math.random() * bestUsedPairs.length)];
         }
     }
 
@@ -1053,9 +1066,17 @@ function optimizeFourPlayers(pArr) {
                 } else {
                     court.teamB = champTeam; court.teamA = challengerTeam;
                 }
+                // [แก้ไข] นับการจับคู่เฉพาะทีมผู้ท้าชิงเท่านั้น
+                // ทีมแชมป์ถูกนับไปแล้วตอนที่ถูกเลือกในรอบแรก
+                // ถ้านับซ้ำ: คู่ที่ครองแชมป์ 2 สมัย จะถูกนับ hist=2 แทนที่จะเป็น 1
+                recordPartnerships(null, challengerTeam);
             }
             
-            recordPartnerships(court.teamA, court.teamB); 
+            // isChampOut: บันทึกทั้งสองทีม (ทั้งคู่ถูกเลือกมาใหม่ในรอบนี้)
+            // !isChampOut: บันทึกแค่ผู้ท้าชิง (บันทึกไปแล้วข้างบน) ไม่บันทึกทีมแชมป์อีก
+            if (data.isChampOut) {
+                recordPartnerships(court.teamA, court.teamB);
+            }
             
             // ล้างความจำหลังใช้งานเสร็จทันที
             clearPreviewCache(); 
@@ -1797,9 +1818,25 @@ function optimizeFourPlayers(pArr) {
             .catch((err) => { console.error('Firebase clear error (non-blocking):', err); })
             .finally(() => { window.location.href = 'index.html'; });
     };
+    let _cloudInitialized = false;
+
     onValue(dbRef, (snapshot) => {
-        if (snapshot.val() && window.restoreFromCloud) window.restoreFromCloud(snapshot.val());
-        // [แก้ไข] แสดง 🟢 ออนไลน์ ทุกครั้งที่ Firebase ตอบกลับสำเร็จ ไม่ใช่แค่ตอน save
+        const cloudData = snapshot.val();
+
+        if (cloudData && window.restoreFromCloud) {
+            // Firebase มีข้อมูล → sync มาที่เครื่องนี้
+            window.restoreFromCloud(cloudData);
+        } else if (!cloudData && !_cloudInitialized) {
+            // Firebase ว่างเปล่า + เชื่อมสำเร็จครั้งแรก
+            // → ถ้าเครื่องนี้มีข้อมูลใน localStorage ให้ push ขึ้น Firebase ทันที
+            // (เกิดตอน rules เพิ่งได้รับการแก้ไข หรือเครื่องนี้เล่นก่อนจะออนไลน์)
+            const localState = localStorage.getItem('badminton_game_state');
+            if (localState && window.saveToCloud) {
+                window.saveToCloud(localState);
+            }
+        }
+
+        _cloudInitialized = true;
         _setCloudStatus('online');
     }, (err) => {
         console.error('Firebase listen error:', err);
