@@ -328,7 +328,7 @@
     const DECAY_FACTOR    = 0.9; // อัตราการ decay (0.9 = ลง 10% ต่อรอบ)
     const SCORE_TOLERANCE = 5;   // คะแนนต่างกันไม่เกินนี้ → สุ่มแทนเลือกค่าต่ำสุดเสมอ ดูเป็นธรรมชาติ
     const RECENT_GAMES    = 3;   // จำนวนเกมล่าสุดที่จะหลีกเลี่ยงคู่ซ้ำ (anti-repeat รอบสั้น)
-    const RECENT_OPP_PENALTY = 8; // โทษเพิ่มถ้า challenger เพิ่งเจอ champ ทีมนี้มา (Champion Bias)
+    const RECENT_OPP_PENALTY = 12; // โทษเพิ่มถ้า challenger เพิ่งเจอ champ ทีมนี้มา (Champion Bias)
     let courts = []; 
     
     let startTimeExact = null;
@@ -571,7 +571,7 @@
 
         players.forEach(p => {
             historyPairs[p] = {};
-            playerStats[p] = { played: 0, wins: 0, losses: 0, arrivalTime: timeNow, lastBenchTime: 0, onBreak: false };
+            playerStats[p] = { played: 0, wins: 0, losses: 0, waitingRounds: 0, arrivalTime: timeNow, lastBenchTime: 0, onBreak: false };
             players.forEach(p2 => { if(p !== p2) historyPairs[p][p2] = 0; });
             if (!opponentHistory[p]) opponentHistory[p] = {};
             players.forEach(p2 => { if(p !== p2) { if(!opponentHistory[p2]) opponentHistory[p2] = {}; opponentHistory[p][p2] = 0; opponentHistory[p2][p] = 0; } });
@@ -653,11 +653,19 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
             (playerStats[p] ? (playerStats[p].lastBenchTime || 0) : 0) < pairBench
         );
         if (!hasMorePatient) {
-            // [Pair Lock Bias] ถ้าคู่ล็อคเพิ่งเล่นไปแล้ว (recent) และยังมี non-locked ≥ 2 คน → ให้คนอื่นก่อน
-            // ไม่ปลดล็อค แต่ลด priority เมื่อเล่นติดกันหลายเกม
+            // [แก้ไข Bug ร้ายแรง] Pair Lock Bias ต้องไม่ override fairness เด็ดขาด
+            // เดิม: ถ้า isRecentPair=true ก็ skip ทันที ไม่ว่า waitingRounds จะสูงแค่ไหน
+            //   ผลคือคู่ล็อคไม่มี fairness gate คุ้มครองเลย เคยเจอ wait=10 รอบโดยไม่ได้ลง
+            // ใหม่: skip ได้เฉพาะตอนที่มีคนอื่นที่ waitingRounds สูงกว่าคู่ล็อคจริงๆ เท่านั้น
+            //   ถ้าคู่ล็อค waitingRounds เท่ากับหรือสูงกว่าทุกคน → ต้องได้เล่น ห้าม skip
             if (isRecentPair(p1, lp)) {
+                let lockWaiting = Math.max(playerStats[p1] ? (playerStats[p1].waitingRounds||0) : 0,
+                                            playerStats[lp] ? (playerStats[lp].waitingRounds||0) : 0);
                 let nonLockedAvail = validRawPool.filter(p => !lockedPairs[p]);
-                if (nonLockedAvail.length >= 2) continue; // มีทางเลือก → ข้ามคู่ล็อครอบนี้
+                let othersMaxWaiting = nonLockedAvail.length > 0
+                    ? Math.max(0, ...nonLockedAvail.map(p => playerStats[p] ? (playerStats[p].waitingRounds||0) : 0))
+                    : 0;
+                if (nonLockedAvail.length >= 2 && othersMaxWaiting > lockWaiting) continue;
             }
             return [p1, lp];
         }
@@ -680,12 +688,67 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
     }
 
     if (nonLockedPool.length >= 2) {
-        // [Non-linear Bench] รางวัลสำหรับการรอนาน: ยิ่งรอนาน ยิ่งได้ priority มากขึ้นแบบ quadratic
-        // wait=0→0, wait=1→-2, wait=2→-6, wait=4→-20 (ค่าลบ = ดี → score ต่ำ = ดี)
-        const nonLinearBench = (lastBenchTime) => {
-            let wait = Math.max(0, globalMatchCounter - (lastBenchTime || 0));
-            return -Math.min(wait * (wait + 1), 30); // quadratic, cap ที่ -30
+        // [Non-linear Bench] ใช้ waitingRounds โดยตรง (แม่นยำกว่า lastBenchTime)
+        // wait=0→0, wait=1→-2, wait=2→-6, wait=4→-20
+        const nonLinearBench = (p) => {
+            let wait = playerStats[p] ? (playerStats[p].waitingRounds || 0) : 0;
+            return -Math.min(wait * (wait + 1), 30);
         };
+
+        // ─── FAIRNESS GATE ──────────────────────────────────────────────────────
+        // ใช้ waitingRounds จริง ไม่ต้องคำนวณจาก lastBenchTime อีกต่อไป
+        // "คนที่ถูกข้ามมากที่สุดต้องได้สิทธิ์ก่อนเสมอ"
+        //
+        // หา maxWaiting = waitingRounds สูงสุดในกลุ่ม non-locked pool
+        // mandatory = ทุกคนที่มี waitingRounds == maxWaiting
+        //
+        // ตัวอย่าง: เก้น(3) ฟ่า(3) นนท์นั่น(1) น้ำแข็ง(0)
+        //   maxWaiting = 3 → mandatory = [เก้น, ฟ่า] → ต้องลงก่อน
+        let maxWaiting = Math.max(0, ...nonLockedPool.map(p => playerStats[p]?.waitingRounds || 0));
+        let mandatory = maxWaiting > 0
+            ? nonLockedPool.filter(p => (playerStats[p]?.waitingRounds || 0) === maxWaiting)
+            : [];
+
+        if (mandatory.length >= 1) {
+            let mPairs;
+            if (mandatory.length >= 2) {
+                // 2+ mandatory → หา best pair จากกลุ่ม mandatory เท่านั้น
+                mPairs = [];
+                for (let i = 0; i < mandatory.length; i++) {
+                    for (let j = i+1; j < mandatory.length; j++) {
+                        mPairs.push([mandatory[i], mandatory[j]]);
+                    }
+                }
+            } else {
+                // 1 mandatory → เขาต้องได้ลง แต่หาคู่ให้เขาจาก nonLockedPool ทั้งหมด
+                let mandP = mandatory[0];
+                mPairs = nonLockedPool.filter(p => p !== mandP).map(p => [mandP, p]);
+            }
+
+            if (mPairs.length > 0) {
+                let scored = mPairs.map(([pi, pj]) => {
+                    let hist = (historyPairs[pi] && historyPairs[pi][pj]) || 0;
+                    let bT = nonLinearBench(pi) + nonLinearBench(pj);
+                    let oppS = 0, rOpp = 0;
+                    vsTeam.forEach(o => {
+                        oppS += (opponentHistory[pi] && opponentHistory[pi][o]) || 0;
+                        oppS += (opponentHistory[pj] && opponentHistory[pj][o]) || 0;
+                        if (isRecentOpponent(pi, o)) rOpp += RECENT_OPP_PENALTY;
+                        if (isRecentOpponent(pj, o)) rOpp += RECENT_OPP_PENALTY;
+                    });
+                    let recentPen = isRecentPair(pi, pj) ? 100 : 0; // เบาลงสำหรับ mandatory
+                    let sc = (hist === 0 ? 0 : hist * PARTNER_WEIGHT) + bT + oppS * OPP_WEIGHT + rOpp + recentPen;
+                    return { pair: [pi, pj], score: sc, isFresh: hist === 0 };
+                });
+
+                let freshM = scored.filter(s => s.isFresh);
+                let eligible = freshM.length > 0 ? freshM : scored;
+                let minSc = Math.min(...eligible.map(s => s.score));
+                let best = eligible.filter(s => s.score <= minSc + SCORE_TOLERANCE);
+                return best[Math.floor(Math.random() * best.length)].pair;
+            }
+        }
+        // ─── END FAIRNESS GATE ──────────────────────────────────────────────────
 
         // [Dynamic Diversity] คนน้อย → weight สูง (ต้องช่วย), คนเยอะ → weight ต่ำ (diversity เกิดเอง)
         // 8 คน → ×2, 16 คน → ×1, 24 คน → ×0.67
@@ -721,11 +784,11 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
                     if (isRecentOpponent(pj, opp)) recentOppPenalty += RECENT_OPP_PENALTY;
                 });
 
-                // [Non-linear Bench] ใช้ quadratic benefit แทน linear lastBenchTime
-                let benchTerm = nonLinearBench(bench_i) + nonLinearBench(bench_j);
+                // ใช้ nonLinearBench ด้วย waitingRounds (แม่นยำกว่า lastBenchTime)
+                let benchTerm = nonLinearBench(pi) + nonLinearBench(pj);
 
                 if (hist === 0) {
-                    freshPairs.push({ pair: [pi, pj], oppScore, diversityBonus, recent, recentOppPenalty });
+                    freshPairs.push({ pair: [pi, pj], oppScore, diversityBonus, recent, recentOppPenalty, benchTerm });
                 } else {
                     let recentPenalty = recent ? 500 : 0;
                     let score = hist * PARTNER_WEIGHT
@@ -743,12 +806,18 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
         if (freshPairs.length > 0) {
             let nonRecentFresh = freshPairs.filter(f => !f.recent);
             let activeFresh = nonRecentFresh.length > 0 ? nonRecentFresh : freshPairs;
-            // เลือกตาม oppScore + recentOppPenalty ต่ำสุด (Champion Bias)
-            let minOpp = Math.min(...activeFresh.map(f => f.oppScore + f.recentOppPenalty));
-            let oppFiltered = activeFresh.filter(f => f.oppScore + f.recentOppPenalty <= minOpp + SCORE_TOLERANCE);
+
+            // [แก้ไข Bug] รวม benchTerm เข้าไปในการเลือก fresh pair ด้วย
+            // เดิม: ใช้แค่ oppScore + diversityBonus → คนที่ไม่เคยลง (bench ต่ำมาก) ยังถูกสุ่มทิ้ง
+            // ใหม่: freshScore = oppScore + recentOppPenalty + benchTerm (ต่ำ = ดี)
+            //   เก้น (รอ 3 รอบ) → benchTerm = -12, freshScore = -12
+            //   ฟ่า  (รอ 3 รอบ) → benchTerm = -12, freshScore = -12
+            //   เก้น+ฟ่า together → freshScore = -24 → ชนะชัดเจน ✅
+            let minFreshScore = Math.min(...activeFresh.map(f => f.oppScore + f.recentOppPenalty + f.benchTerm));
+            let scoreFiltered = activeFresh.filter(f => f.oppScore + f.recentOppPenalty + f.benchTerm <= minFreshScore + SCORE_TOLERANCE);
             // tiebreak ด้วย diversityBonus
-            let minDiv = Math.min(...oppFiltered.map(f => f.diversityBonus));
-            let bestFresh = oppFiltered.filter(f => f.diversityBonus <= minDiv + SCORE_TOLERANCE * 2);
+            let minDiv = Math.min(...scoreFiltered.map(f => f.diversityBonus));
+            let bestFresh = scoreFiltered.filter(f => f.diversityBonus <= minDiv + SCORE_TOLERANCE * 2);
             return bestFresh[Math.floor(Math.random() * bestFresh.length)].pair;
         }
 
@@ -830,17 +899,22 @@ function optimizeFourPlayers(pArr) {
         if (teamA && teamA.p1 && teamA.p2) {
             historyPairs[teamA.p1][teamA.p2] = (historyPairs[teamA.p1][teamA.p2] || 0) + 1;
             historyPairs[teamA.p2][teamA.p1] = (historyPairs[teamA.p2][teamA.p1] || 0) + 1;
-            // บันทึก recentPairs สำหรับ anti-repeat รอบสั้น
-            recentPairs.unshift({ p1: teamA.p1, p2: teamA.p2 });
+            // บันทึก recentPairs สำหรับ anti-repeat รอบสั้น (tag ด้วย gmc เพื่อกรองตามเวลาจริง)
+            recentPairs.unshift({ p1: teamA.p1, p2: teamA.p2, gmc: globalMatchCounter });
         }
         if (teamB && teamB.p1 && teamB.p2) {
             historyPairs[teamB.p1][teamB.p2] = (historyPairs[teamB.p1][teamB.p2] || 0) + 1;
             historyPairs[teamB.p2][teamB.p1] = (historyPairs[teamB.p2][teamB.p1] || 0) + 1;
-            recentPairs.unshift({ p1: teamB.p1, p2: teamB.p2 });
+            recentPairs.unshift({ p1: teamB.p1, p2: teamB.p2, gmc: globalMatchCounter });
         }
-        // เก็บแค่ RECENT_GAMES * 2 คู่ล่าสุด (2 teams × N เกม)
-        const limit = RECENT_GAMES * 2 * Math.max(numCourts, 1);
-        if (recentPairs.length > limit) recentPairs = recentPairs.slice(0, limit);
+        // [แก้ไข Bug] กรองตาม "จำนวนแมตช์จริงที่ผ่านมา" (gmc) แทนความยาวอาเรย์
+        // เดิม: cap ด้วย array length สมมติว่าทุกแมตช์เพิ่ม 2 entries เสมอ (teamA+teamB)
+        //   แต่ตอนแชมป์ต่อเนื่อง recordPartnerships(null, challengerTeam) เพิ่มแค่ 1 entry
+        //   ทำให้ buffer ครอบคลุมแมตช์ได้มากกว่าที่ตั้งใจถึง ~2 เท่า
+        //   ผลคือ isRecentPair ค้าง true นานเกินไป (พบจริง: ค้าง 9 แมตช์ติดจากที่ตั้งใจ 3 รอบ)
+        //   ทำให้คู่ล็อคโดน "Pair Lock Bias" skip ต่อเนื่องแม้ waitingRounds พุ่งถึง 9-10 แล้ว
+        const recentWindow = RECENT_GAMES * Math.max(numCourts, 1);
+        recentPairs = recentPairs.filter(rp => globalMatchCounter - rp.gmc < recentWindow);
 
         // opponentHistory: cap ไว้ที่ H_MAX_OPP เพื่อไม่ให้ penalty โตจนครอบงำ algorithm
         if (teamA && teamB) {
@@ -851,11 +925,10 @@ function optimizeFourPlayers(pArr) {
                 if (!opponentHistory[b]) opponentHistory[b] = {};
                 opponentHistory[a][b] = Math.min((opponentHistory[a][b] || 0) + 1, H_MAX_OPP);
                 opponentHistory[b][a] = Math.min((opponentHistory[b][a] || 0) + 1, H_MAX_OPP);
-                // บันทึก recentOpponents สำหรับ Champion Bias
-                recentOpponents.unshift({ p1: a, p2: b });
+                // บันทึก recentOpponents สำหรับ Champion Bias (tag ด้วย gmc เช่นกัน)
+                recentOpponents.unshift({ p1: a, p2: b, gmc: globalMatchCounter });
             }));
-            const oppLimit = RECENT_GAMES * 4;
-            if (recentOpponents.length > oppLimit) recentOpponents = recentOpponents.slice(0, oppLimit);
+            recentOpponents = recentOpponents.filter(ro => globalMatchCounter - ro.gmc < recentWindow);
         }
     }
 
@@ -1064,7 +1137,25 @@ function optimizeFourPlayers(pArr) {
         let winner = winnerTeam === 'A' ? court.teamA : court.teamB;
         let loser = winnerTeam === 'A' ? court.teamB : court.teamA;
 
+        let loserArr = req === 1 ? [loser.p1] : [loser.p1, loser.p2];
+        let winnerArr = req === 1 ? [winner.p1] : [winner.p1, winner.p2];
+
         globalMatchCounter++;
+
+        // อัปเดต waitingRounds: ติดตาม "รอบที่ถูกข้ามติดต่อกัน" โดยตรง ไม่ต้องคำนวณจาก lastBenchTime
+        // คนที่เพิ่งลง → reset = 0
+        // คนที่ยังรออยู่ใน queue (ไม่ได้ลงรอบนี้) → +1
+        // คนที่กำลังเล่นในสนามอื่น (ถูก pullPlayer ไปแล้ว) → ไม่นับ (ยังไม่ถูกข้าม)
+        let justPlayedSet = new Set([...loserArr, ...winnerArr]);
+        players.forEach(p => {
+            if (!playerStats[p] || playerStats[p].onBreak) return;
+            if (justPlayedSet.has(p)) {
+                playerStats[p].waitingRounds = 0; // เพิ่งลง → รีเซ็ต
+            } else if (mainQueue.includes(p) || eliminatedOrder.includes(p)) {
+                // อยู่ใน queue = รอจริงๆ ไม่ใช่กำลังเล่นในสนามอื่น
+                playerStats[p].waitingRounds = (playerStats[p].waitingRounds || 0) + 1;
+            }
+        });
 
         // Decay ค่า historyPairs ทุก DECAY_INTERVAL รอบ
         // ข้อมูลเก่าจะค่อยๆ จางลง ไม่ใช่ตันอยู่ที่เลขเดิมตลอด
@@ -1084,9 +1175,6 @@ function optimizeFourPlayers(pArr) {
                 });
             });
         }
-        
-        let loserArr = req === 1 ? [loser.p1] : [loser.p1, loser.p2];
-        let winnerArr = req === 1 ? [winner.p1] : [winner.p1, winner.p2];
 
         // [แก้ไข Bug] ใช้ globalMatchCounter + 1 เพื่อให้ selectTeam กรองคนแพ้ออกได้ถูกต้อง
         // เหตุผล: selectTeam เช็ค lastBenchTime !== globalMatchCounter ณ เวลาที่เรียก
@@ -1417,7 +1505,7 @@ function optimizeFourPlayers(pArr) {
         // [หมายเหตุ] ตั้ง played เท่ากับ minPlayed เพื่อให้ระบบดึงคนใหม่ลงสนามก่อน
         // wins/losses ตั้งเป็น 0 ไว้ก่อน เพราะยังไม่มีประวัติการแข่ง (Win Rate จะถูกต้องหลังแข่งครั้งแรก)
         players.push(name); historyPairs[name] = {}; 
-        playerStats[name] = { played: minPlayed, wins: 0, losses: 0, arrivalTime: timeNow, lastBenchTime: 0, onBreak: false };
+        playerStats[name] = { played: minPlayed, wins: 0, losses: 0, waitingRounds: 0, arrivalTime: timeNow, lastBenchTime: 0, onBreak: false };
         players.forEach(p => { if(p !== name) { if(!historyPairs[p]) historyPairs[p] = {}; historyPairs[p][name] = 0; historyPairs[name][p] = 0; } });
         if (!opponentHistory[name]) opponentHistory[name] = {};
         players.forEach(p => { if(p !== name) { if(!opponentHistory[p]) opponentHistory[p] = {}; opponentHistory[p][name] = opponentHistory[p][name] || 0; opponentHistory[name][p] = opponentHistory[name][p] || 0; } });
