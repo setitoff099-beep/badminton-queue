@@ -638,37 +638,37 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
     }
 
     // --- Step 1: เช็คคู่ล็อค ---
-    // ถ้าไม่มีคนรอนานกว่าคู่ล็อค ให้คู่ล็อคลงได้เลย
+    // [แก้ไข Bug โครงสร้างร้ายแรง] เดิม Step 1 ใช้ lastBenchTime (hasMorePatient) ทั้งหมด
+    // ซึ่งเป็นคนละระบบกับ waitingRounds-based Fairness Gate ที่ใช้กับคนอื่นใน Step 2
+    // ผลคือคู่ล็อคไม่ได้อยู่ใต้ fairness gate เดียวกับทุกคน
+    // พบจริงจากการเทส (เรียก production code ตรงๆ ผ่าน vm, ไม่ใช่ copy logic):
+    //   12 คน 1 สนาม → คู่ล็อครอถึง waitingRounds=12 ขณะที่คนอื่นสูงสุดแค่ 3
+    // แก้: ใช้ waitingRounds เดียวกันทุกคน คู่ล็อคนับเป็น 1 หน่วยที่มี waiting = max ของทั้งคู่
     for (let p1 of pool) {
         if (!lockedPairs[p1]) continue;
         let lp = lockedPairs[p1];
         if (!validRawPool.includes(lp)) continue;
 
-        let pairBench = Math.max(
-            playerStats[p1] ? (playerStats[p1].lastBenchTime || 0) : 0,
-            playerStats[lp] ? (playerStats[lp].lastBenchTime || 0) : 0
+        let lockWaiting = Math.max(
+            playerStats[p1] ? (playerStats[p1].waitingRounds || 0) : 0,
+            playerStats[lp] ? (playerStats[lp].waitingRounds || 0) : 0
         );
-        let hasMorePatient = validRawPool.some(p =>
-            !lockedPairs[p] && p !== p1 &&
-            (playerStats[p] ? (playerStats[p].lastBenchTime || 0) : 0) < pairBench
-        );
-        if (!hasMorePatient) {
-            // [แก้ไข Bug ร้ายแรง] Pair Lock Bias ต้องไม่ override fairness เด็ดขาด
-            // เดิม: ถ้า isRecentPair=true ก็ skip ทันที ไม่ว่า waitingRounds จะสูงแค่ไหน
-            //   ผลคือคู่ล็อคไม่มี fairness gate คุ้มครองเลย เคยเจอ wait=10 รอบโดยไม่ได้ลง
-            // ใหม่: skip ได้เฉพาะตอนที่มีคนอื่นที่ waitingRounds สูงกว่าคู่ล็อคจริงๆ เท่านั้น
-            //   ถ้าคู่ล็อค waitingRounds เท่ากับหรือสูงกว่าทุกคน → ต้องได้เล่น ห้าม skip
-            if (isRecentPair(p1, lp)) {
-                let lockWaiting = Math.max(playerStats[p1] ? (playerStats[p1].waitingRounds||0) : 0,
-                                            playerStats[lp] ? (playerStats[lp].waitingRounds||0) : 0);
-                let nonLockedAvail = validRawPool.filter(p => !lockedPairs[p]);
-                let othersMaxWaiting = nonLockedAvail.length > 0
-                    ? Math.max(0, ...nonLockedAvail.map(p => playerStats[p] ? (playerStats[p].waitingRounds||0) : 0))
-                    : 0;
-                if (nonLockedAvail.length >= 2 && othersMaxWaiting > lockWaiting) continue;
-            }
+        let nonLockedAvail = validRawPool.filter(p => !lockedPairs[p]);
+        let othersMaxWaiting = nonLockedAvail.length > 0
+            ? Math.max(0, ...nonLockedAvail.map(p => playerStats[p] ? (playerStats[p].waitingRounds || 0) : 0))
+            : 0;
+
+        if (lockWaiting > othersMaxWaiting) {
+            // คู่ล็อครอนานกว่าทุกคนจริง → ต้องได้เล่น ไม่มีข้อยกเว้น (fairness floor)
             return [p1, lp];
         }
+        if (lockWaiting === othersMaxWaiting) {
+            // เสมอกัน → ใช้ Pair Lock Bias เป็น tiebreaker เท่านั้น (ไม่ override fairness)
+            // ถ้าคู่ล็อคเพิ่งเล่นไปและมีตัวเลือกอื่น ให้คนอื่นไปก่อนตอนเสมอกัน
+            if (isRecentPair(p1, lp) && nonLockedAvail.length >= 2) continue;
+            return [p1, lp];
+        }
+        // lockWaiting < othersMaxWaiting → ยังไม่ถึงตาคู่ล็อค ปล่อยให้ Step 2 จัดการคนอื่นก่อน
     }
 
     // --- Step 2: หาคู่ที่ดีที่สุดจาก pool (ไม่มีล็อค) ---
