@@ -952,6 +952,456 @@ function optimizeFourPlayers(pArr) {
     return bestCombos[Math.floor(Math.random() * bestCombos.length)];
 }
 
+// ════════════════════════════════════════════════════════════════════
+// MATCHMAKING ENGINE V2 — Constraint-based Pipeline (Phase 1, ตาม Design Doc)
+// ════════════════════════════════════════════════════════════════════
+// สถานะ: ยังไม่ถูกเรียกใช้จริงจากที่ไหนเลย — selectTeam/optimizeFourPlayers/
+// prepareNextMatch เดิมข้างบนทำงานตามปกติทุกประการ ไม่มีผลกระทบต่อ UI/behavior ใดๆ
+// (ตามข้อกำหนด: ห้ามเปลี่ยนพฤติกรรม UI, ห้ามลบโค้ดเดิมจนกว่า Pipeline นี้จะผ่าน Validation)
+//
+// เปิด debug log: DEBUG_PIPELINE = true แล้วดู pipelineLog ใน console
+// ════════════════════════════════════════════════════════════════════
+
+let DEBUG_PIPELINE = false; // เปิด/ปิด debug log ของ pipeline ใหม่ (แยกจาก DEBUG_MATCHMAKING เดิมโดยเจตนา)
+let pipelineLog = [];
+
+// helper: unordered pair key — บังคับ A+B === B+A เป็น invariant ของโครงสร้างข้อมูล
+function pairKey(a, b) {
+    return [a, b].sort().join('|');
+}
+
+// Stage 0+1+2: Eligible Universe + Just-Played Exclusion + Locked Pair Integrity
+// minRequired: จำนวนคนขั้นต่ำที่ต้องการจริง (2 สำหรับ challenger-selection, 4 สำหรับ fresh-selection)
+// [แก้ไข] เดิม hardcode เป็น 4 เสมอ ทำให้ challenger-selection (ต้องการแค่ 2) ผ่อนกฎ just-played
+// บ่อยเกินจำเป็นในกลุ่มเล็ก (ยืนยันจริง: 6 คน 1 ล็อคคู่ → just-played violations พุ่งสูงผิดปกติ)
+function buildEligiblePool(excludeList, minRequired) {
+    excludeList = excludeList || [];
+    minRequired = minRequired || 2;
+
+    // Stage 0: raw pool (เหมือน getAvailablePlayers เดิมทุกประการ)
+    let rawPool = [];
+    for (let p of mainQueue) { if (!excludeList.includes(p) && !(playerStats[p] && playerStats[p].onBreak)) rawPool.push(p); }
+    for (let p of eliminatedOrder) { if (!excludeList.includes(p) && !rawPool.includes(p) && !(playerStats[p] && playerStats[p].onBreak)) rawPool.push(p); }
+
+    // Stage 1: ตัดคนเพิ่งลง — waitingRounds===0 AND played>0
+    let stage1Pool = rawPool.filter(p => {
+        if (!playerStats[p]) return true;
+        let justPlayed = (playerStats[p].waitingRounds || 0) === 0 && (playerStats[p].played || 0) > 0;
+        return !justPlayed;
+    });
+
+    // ข้อยกเว้นเดียว: ถ้าตัดแล้วเหลือผู้เล่นไม่พอตาม "ที่ต้องการจริง" ผ่อนกฎนี้ "จุดเดียว"
+    // [แก้ไข Category C — Deadlock Root Cause] เดิม .slice(0,needed) ไม่รู้จักความสัมพันธ์คู่ล็อค
+    // อาจดึงคนคนเดียวของคู่ล็อคกลับมา ทำให้ Stage 2 ต้องตัด "อีกคนที่อยู่ใน pool อยู่แล้ว" ทิ้งซ้ำ
+    // (ยืนยันจริงจาก Deadlock Report: exclusionReasons.B = "Stage2 locked-pair-incomplete")
+    // ใหม่: จัดกลุ่มเป็น "หน่วยที่เพิ่มแล้วไม่ถูก Stage 2 ตัดทิ้งภายหลัง" ก่อนค่อยเพิ่มทีละหน่วย
+    //   - คนไม่มีคู่ล็อค = หน่วยขนาด 1
+    //   - คนมีคู่ล็อคที่ "คู่อยู่ใน stage1Pool แล้ว" = หน่วยขนาด 1 (เพิ่มคนเดียวพอ ปลอดภัย)
+    //   - คนมีคู่ล็อคที่ "คู่ก็ต้องดึงกลับมาเหมือนกัน" = หน่วยขนาด 2 (ต้องเพิ่มพร้อมกันเสมอ)
+    //   - คนมีคู่ล็อคที่ "คู่ไม่อยู่ทั้ง pool และ justPlayed เลย" (เช่น คู่คือแชมป์ที่ถูก exclude)
+    //     = ไม่สร้างหน่วยให้เลย (เพิ่มไปก็ไร้ประโยชน์ โดน Stage 2 ตัดทิ้งแน่นอน ไม่ควรเปลือง slot)
+    // นี่คือการแก้ "วิธี Recovery" เท่านั้น ไม่ได้แก้ Constraint ของ Stage 1/Stage 2 เลยแม้แต่นิดเดียว
+    let usedJustPlayedFallback = false;
+    if (stage1Pool.length < minRequired && rawPool.length > stage1Pool.length) {
+        let justPlayedPlayers = rawPool.filter(p => !stage1Pool.includes(p));
+        let needed = minRequired - stage1Pool.length;
+
+        let units = [];
+        let consumed = new Set();
+        justPlayedPlayers.forEach(p => {
+            if (consumed.has(p)) return;
+            if (!lockedPairs[p]) {
+                units.push([p]); consumed.add(p);
+                return;
+            }
+            let partner = lockedPairs[p];
+            if (stage1Pool.includes(partner)) {
+                units.push([p]); consumed.add(p); // คู่อยู่ใน pool แล้ว เพิ่มแค่คนเดียวปลอดภัย
+            } else if (justPlayedPlayers.includes(partner) && !consumed.has(partner)) {
+                units.push([p, partner]); consumed.add(p); consumed.add(partner); // ต้องเพิ่มคู่กัน
+            }
+            // กรณีคู่ไม่อยู่ทั้งสองที่ -> ไม่สร้างหน่วยให้ p (ข้ามไป ไม่เปลือง slot กับคนที่ใช้ไม่ได้)
+        });
+
+        let fallbackAddedBack = [];
+        for (let unit of units) {
+            if (fallbackAddedBack.length >= needed) break;
+            fallbackAddedBack.push(...unit);
+        }
+        stage1Pool = [...stage1Pool, ...fallbackAddedBack];
+        usedJustPlayedFallback = fallbackAddedBack.length > 0;
+    }
+
+
+    // Stage 2: locked pair integrity
+    let stage2Pool = stage1Pool.filter(p => !lockedPairs[p] || stage1Pool.includes(lockedPairs[p]));
+    let stage2DroppedForLock = stage1Pool.filter(p => !stage2Pool.includes(p));
+    if (stage2Pool.length < 2 && stage1Pool.length >= 2) {
+        stage2Pool = stage1Pool; // ผ่อนถ้ากรองแล้วเหลือน้อยเกินไป (กันพัง ไม่ใช่กรณีปกติ)
+        stage2DroppedForLock = [];
+    }
+
+    // [ใหม่] เก็บ "เหตุผลการตัดออก" ของทุกคนในระบบเสมอ (ไม่ผูกกับ DEBUG_PIPELINE)
+    // ใช้สำหรับ Deadlock Report เมื่อ pool ไม่พอ — รู้ทันทีว่าใครหาย เพราะอะไร
+    let exclusionReasons = {};
+    players.forEach(p => {
+        if (excludeList.includes(p)) { exclusionReasons[p] = 'excludeList (แชมป์/ทีมตรงข้าม)'; return; }
+        if (playerStats[p] && playerStats[p].onBreak) { exclusionReasons[p] = 'onBreak'; return; }
+        if (!rawPool.includes(p)) { exclusionReasons[p] = 'ไม่อยู่ใน mainQueue/eliminatedOrder (กำลังเล่นอยู่สนามอื่น)'; return; }
+        if (!stage1Pool.includes(p)) {
+            exclusionReasons[p] = `Stage1 just-played (waitingRounds=${playerStats[p]?.waitingRounds ?? '?'}, played=${playerStats[p]?.played ?? '?'})`;
+            return;
+        }
+        if (stage2DroppedForLock.includes(p)) {
+            exclusionReasons[p] = `Stage2 locked-pair-incomplete (ล็อคกับ ${lockedPairs[p]} แต่คู่ไม่อยู่ใน pool)`;
+            return;
+        }
+        exclusionReasons[p] = null; // ผ่านทุก stage — อยู่ใน pool สุดท้าย
+    });
+    __lastEligiblePoolDebug = {
+        gmc: globalMatchCounter, excludeList, minRequired,
+        rawPoolSize: rawPool.length, afterStage1: stage1Pool.length, afterStage2: stage2Pool.length,
+        usedJustPlayedFallback, finalPool: stage2Pool, exclusionReasons,
+    };
+
+    if (DEBUG_PIPELINE) {
+        pipelineLog.push(__lastEligiblePoolDebug);
+    }
+
+    return stage2Pool;
+}
+let __lastEligiblePoolDebug = null; // เก็บ snapshot ล่าสุดของ buildEligiblePool เสมอ สำหรับ Deadlock Report
+let __lastDeadlockReport = null; // เก็บ context เต็มของครั้งล่าสุดที่ pool ไม่พอ (เสมอ ไม่ผูกกับ DEBUG_PIPELINE)
+
+// Coverage Manager — Player-Centric (ข้อ 1 ของ design รอบปรับปรุง)
+// แทนที่จะเทียบกับ global min ของทั้งพูล (ซึ่งทำให้เกิด starvation ได้) แต่ละคนมีเกณฑ์ความสด
+// เป็นของตัวเอง คำนวณจากตัวเลือกที่ดีที่สุดที่ตัวเองยังหาได้ในพูลนั้น
+function getCoverageState(eligiblePool) {
+    let nonLockedPool = eligiblePool.filter(p => !lockedPairs[p]);
+    let playerMin = {};
+    let playerCovered = {};
+
+    nonLockedPool.forEach(p => {
+        let others = nonLockedPool.filter(x => x !== p);
+        if (others.length === 0) {
+            playerMin[p] = 0;
+            playerCovered[p] = false;
+            return;
+        }
+        let minVal = Infinity;
+        others.forEach(x => {
+            let h = (historyPairs[p] && historyPairs[p][x] !== undefined) ? historyPairs[p][x] : 0;
+            if (h < minVal) minVal = h;
+        });
+        playerMin[p] = minVal;
+        playerCovered[p] = minVal > 0;
+    });
+
+    let isFullyCovered = nonLockedPool.length > 0 && nonLockedPool.every(p => playerCovered[p]);
+
+    if (DEBUG_PIPELINE) {
+        pipelineLog.push({ stage: 'getCoverageState', gmc: globalMatchCounter, poolSize: nonLockedPool.length, playerMin, isFullyCovered });
+    }
+
+    return { playerMin, playerCovered, isFullyCovered, nonLockedPool };
+}
+
+// Stage 3: Build Candidate Pairs (unordered, เคารพ locked pair — เอาเฉพาะคู่ไม่ล็อคหรือคู่ล็อคที่ตรงกัน)
+function buildCandidatePairs(pool) {
+    let pairs = [];
+    for (let i = 0; i < pool.length; i++) {
+        for (let j = i + 1; j < pool.length; j++) {
+            let a = pool[i], b = pool[j];
+            if (lockedPairs[a] && lockedPairs[a] !== b) continue;
+            if (lockedPairs[b] && lockedPairs[b] !== a) continue;
+            pairs.push([a, b]);
+        }
+    }
+    if (DEBUG_PIPELINE) {
+        pipelineLog.push({ stage: 'buildCandidatePairs', gmc: globalMatchCounter, count: pairs.length });
+    }
+    return pairs;
+}
+
+// Stage 4: HARD — Waiting Priority (Fairness Gate)
+function applyWaitingConstraint(pairs) {
+    if (pairs.length === 0) return pairs;
+    let allPlayers = new Set();
+    pairs.forEach(([a, b]) => { allPlayers.add(a); allPlayers.add(b); });
+    let maxWaiting = 0;
+    allPlayers.forEach(p => {
+        let w = playerStats[p] ? (playerStats[p].waitingRounds || 0) : 0;
+        if (w > maxWaiting) maxWaiting = w;
+    });
+    let filtered = pairs.filter(([a, b]) => {
+        let wa = playerStats[a] ? (playerStats[a].waitingRounds || 0) : 0;
+        let wb = playerStats[b] ? (playerStats[b].waitingRounds || 0) : 0;
+        return wa === maxWaiting || wb === maxWaiting;
+    });
+    if (DEBUG_PIPELINE) {
+        pipelineLog.push({ stage: 'applyWaitingConstraint', gmc: globalMatchCounter, maxWaiting, before: pairs.length, after: filtered.length });
+    }
+    return filtered.length > 0 ? filtered : pairs;
+}
+
+// Stage 5: HARD — Pair Coverage แบบ Player-Centric
+function applyFreshnessConstraint(pairs, coverage) {
+    if (pairs.length === 0) return pairs;
+    let filtered = pairs.filter(([a, b]) => {
+        if (lockedPairs[a] || lockedPairs[b]) return true; // คู่ล็อคไม่ผ่าน freshness check (จัดการแยกใน selectPairFromPool)
+        let h = (historyPairs[a] && historyPairs[a][b] !== undefined) ? historyPairs[a][b] : 0;
+        let minA = coverage.playerMin[a] !== undefined ? coverage.playerMin[a] : 0;
+        let minB = coverage.playerMin[b] !== undefined ? coverage.playerMin[b] : 0;
+        return h === minA || h === minB;
+    });
+    if (DEBUG_PIPELINE) {
+        pipelineLog.push({ stage: 'applyFreshnessConstraint', gmc: globalMatchCounter, before: pairs.length, after: filtered.length });
+    }
+    return filtered.length > 0 ? filtered : pairs;
+}
+
+// Stage 6+7: SOFT Scoring (opponentHistory tie-break) + Pick
+function scoreAndPick(pairs, vsTeam) {
+    vsTeam = vsTeam || [];
+    if (pairs.length === 0) return null;
+    if (pairs.length === 1) return pairs[0];
+
+    let scored = pairs.map(([a, b]) => {
+        let oppScore = 0;
+        vsTeam.forEach(o => {
+            oppScore += (opponentHistory[a] && opponentHistory[a][o]) || 0;
+            oppScore += (opponentHistory[b] && opponentHistory[b][o]) || 0;
+        });
+        return { pair: [a, b], oppScore };
+    });
+
+    let minOpp = Math.min(...scored.map(s => s.oppScore));
+    let best = scored.filter(s => s.oppScore === minOpp);
+    let chosen = best[Math.floor(Math.random() * best.length)].pair;
+
+    if (DEBUG_PIPELINE) {
+        pipelineLog.push({ stage: 'scoreAndPick', gmc: globalMatchCounter, numCandidates: scored.length, minOpp, chosen });
+    }
+    return chosen;
+}
+
+// เลือก 1 คู่จาก pool ที่ให้มา (ใช้ร่วมกันทั้ง challenger-selection และ fallback ของ joint generation)
+function selectPairFromPool(pool, vsTeam) {
+    vsTeam = vsTeam || [];
+    if (pool.length < 2) return null;
+
+    let coverage = getCoverageState(pool);
+
+    // เช็คคู่ล็อคก่อนเสมอ (ใช้ waitingRounds ล้วน ไม่ผสม lastBenchTime แบบของเดิม)
+    for (let p1 of pool) {
+        if (!lockedPairs[p1]) continue;
+        let lp = lockedPairs[p1];
+        if (!pool.includes(lp)) continue;
+        let lockWaiting = Math.max(
+            playerStats[p1] ? (playerStats[p1].waitingRounds || 0) : 0,
+            playerStats[lp] ? (playerStats[lp].waitingRounds || 0) : 0
+        );
+        let nonLockedInPool = pool.filter(p => !lockedPairs[p]);
+        let othersMaxWaiting = nonLockedInPool.length > 0
+            ? Math.max(0, ...nonLockedInPool.map(p => playerStats[p] ? (playerStats[p].waitingRounds || 0) : 0))
+            : 0;
+        if (lockWaiting >= othersMaxWaiting) {
+            if (DEBUG_PIPELINE) pipelineLog.push({ stage: 'selectPairFromPool-lockedPair', gmc: globalMatchCounter, chosen: [p1, lp], lockWaiting, othersMaxWaiting });
+            return [p1, lp];
+        }
+    }
+
+    let pairs = buildCandidatePairs(pool).filter(([a, b]) => !lockedPairs[a] && !lockedPairs[b]);
+    if (pairs.length === 0) {
+        let readyLocked = pool.find(p => lockedPairs[p] && pool.includes(lockedPairs[p]));
+        if (readyLocked) return [readyLocked, lockedPairs[readyLocked]];
+        return pool.length >= 2 ? pool.slice(0, 2) : null;
+    }
+    pairs = applyWaitingConstraint(pairs);
+    pairs = applyFreshnessConstraint(pairs, coverage);
+    return scoreAndPick(pairs, vsTeam);
+}
+
+// Pipeline หลักสำหรับ challenger-selection (1 คู่จาก N คน, มีแชมป์อยู่ต่อ)
+function selectTeamV2(excludeList, vsTeam) {
+    let pool = buildEligiblePool(excludeList, 2); // ต้องการแค่ 2 คน ไม่ใช่ 4
+    if (pool.length < 2) {
+        __lastDeadlockReport = {
+            gmc: globalMatchCounter, type: 'challenger-selection', minRequired: 2,
+            poolGot: pool.length, excludeList,
+            eligiblePoolDebug: __lastEligiblePoolDebug,
+        };
+        return null;
+    }
+    return selectPairFromPool(pool, vsTeam);
+}
+
+// Joint Generation สำหรับ fresh-selection (เลือกใหม่ทั้ง 2 ทีมพร้อมกัน, ข้อ 3.3 ของ design)
+// Complexity: C(n,4)×3 — validate แล้วว่า n=32 อยู่ที่ ~108,000 evaluations (<50ms)
+function generateAllValidTeams(excludeList) {
+    let pool = buildEligiblePool(excludeList, 4); // ต้องการ 4 คนเต็ม
+    if (pool.length < 4) {
+        // [ใหม่] บันทึก deadlock context เสมอ (ไม่ผูกกับ DEBUG_PIPELINE) สำหรับ Deadlock Report
+        __lastDeadlockReport = {
+            gmc: globalMatchCounter, type: 'fresh-selection', minRequired: 4,
+            poolGot: pool.length, excludeList,
+            eligiblePoolDebug: __lastEligiblePoolDebug,
+        };
+        if (DEBUG_PIPELINE) pipelineLog.push({ stage: 'generateAllValidTeams-insufficientPool', gmc: globalMatchCounter, poolSize: pool.length });
+        return null;
+    }
+
+    let coverage = getCoverageState(pool);
+
+    // ถ้ามีคู่ล็อคที่ต้องได้ลง (waitingRounds สูงสุด) ให้ fix เป็น 1 ใน 2 ทีมก่อน
+    // แล้วหาอีกทีมจาก pool ที่เหลือผ่าน selectPairFromPool (ลดความซับซ้อนจาก C(n,4) เหลือ C(n-2,2))
+    let lockedCandidate = pool.find(p => lockedPairs[p] && pool.includes(lockedPairs[p]));
+    if (lockedCandidate) {
+        let lp = lockedPairs[lockedCandidate];
+        let lockWaiting = Math.max(
+            playerStats[lockedCandidate] ? (playerStats[lockedCandidate].waitingRounds || 0) : 0,
+            playerStats[lp] ? (playerStats[lp].waitingRounds || 0) : 0
+        );
+        let nonLockedInPool = pool.filter(p => !lockedPairs[p]);
+        let othersMaxWaiting = nonLockedInPool.length > 0
+            ? Math.max(0, ...nonLockedInPool.map(p => playerStats[p] ? (playerStats[p].waitingRounds || 0) : 0))
+            : 0;
+        if (lockWaiting >= othersMaxWaiting) {
+            let remainingPool = pool.filter(p => p !== lockedCandidate && p !== lp);
+            let teamB = selectPairFromPool(remainingPool, [lockedCandidate, lp]);
+            if (DEBUG_PIPELINE) pipelineLog.push({ stage: 'generateAllValidTeams-lockedPath', gmc: globalMatchCounter, teamA: [lockedCandidate, lp], teamB });
+            if (!teamB) {
+                __lastDeadlockReport = {
+                    gmc: globalMatchCounter, type: 'fresh-selection-lockedPath-subfail', minRequired: 2,
+                    poolGot: remainingPool.length, remainingPool, fixedTeamA: [lockedCandidate, lp],
+                    fullPoolBeforeSplit: pool, excludeList,
+                };
+                return null;
+            }
+            return { teamA: [lockedCandidate, lp], teamB };
+        }
+    }
+
+    let nonLockedPool = pool.filter(p => !lockedPairs[p]);
+    let n = nonLockedPool.length;
+
+    if (n < 4) {
+        // [แก้ไข Category B — Deadlock Root Cause] เดิมลองหาทั้ง 2 ทีมจาก nonLockedPool อย่างเดียว
+        // ทั้งที่คู่ล็อค (ถ้ามี) นั่งอยู่ใน pool เฉยๆ ไม่เคยถูกพิจารณาเป็น "ทีมสำรอง" เมื่อ nonLockedPool
+        // ไม่พอสร้าง 2 ทีมเอง (ยืนยันจริงจาก Deadlock Report: nonLockedPool เหลือ 2 คน หมดไปกับ teamA
+        // remaining=[] สำหรับ teamB ทั้งที่คู่ล็อคอยู่ใน fullPoolBeforeSplit ตลอด)
+        // ใหม่: ถ้า nonLockedPool ไม่พอสร้าง 2 ทีม (< 4) แต่มีคู่ล็อคที่ยังไม่ถูกใช้อยู่ใน pool
+        // ให้ใช้คู่ล็อคเป็นทีมหนึ่งเสมอ (ไม่ใช่การข้าม fairness — เป็นทางออกเดียวที่มีจริง เทียบเท่า
+        // หลักการเดียวกับ just-played fallback ที่มีอยู่แล้ว: ใช้ตัวเลือกเดียวที่เหลือเมื่อไม่มีทางอื่น)
+        // teamB ยังคงถูกเลือกผ่าน selectPairFromPool ตามปกติ (Stage 4/5 ยังทำงานเหมือนเดิมทุกประการ)
+        let unusedLockedPlayer = pool.find(p => lockedPairs[p] && pool.includes(lockedPairs[p]));
+        if (unusedLockedPlayer && nonLockedPool.length >= 2) {
+            let partner = lockedPairs[unusedLockedPlayer];
+            let teamB = selectPairFromPool(nonLockedPool, [unusedLockedPlayer, partner]);
+            if (teamB) {
+                if (DEBUG_PIPELINE) pipelineLog.push({ stage: 'generateAllValidTeams-lockedFillerFallback', gmc: globalMatchCounter, teamA: [unusedLockedPlayer, partner], teamB });
+                return { teamA: [unusedLockedPlayer, partner], teamB };
+            }
+        }
+
+        // พอสำหรับ pool รวม (>=4) แต่ nonLocked ไม่พอสำหรับ joint generation และไม่มีคู่ล็อคให้ใช้ → ทำทีละคู่แทน
+        let teamA = selectPairFromPool(nonLockedPool, []);
+        if (!teamA) {
+            __lastDeadlockReport = {
+                gmc: globalMatchCounter, type: 'fresh-selection-nLessThan4-teamA-fail', minRequired: 2,
+                poolGot: nonLockedPool.length, nonLockedPool, fullPoolBeforeSplit: pool, excludeList,
+            };
+            return null;
+        }
+        let remaining = nonLockedPool.filter(p => !teamA.includes(p));
+        let teamB = selectPairFromPool(remaining, teamA);
+        if (!teamB) {
+            __lastDeadlockReport = {
+                gmc: globalMatchCounter, type: 'fresh-selection-nLessThan4-teamB-fail', minRequired: 2,
+                poolGot: remaining.length, remaining, fixedTeamA: teamA, fullPoolBeforeSplit: pool, excludeList,
+            };
+            return null;
+        }
+        if (DEBUG_PIPELINE) pipelineLog.push({ stage: 'generateAllValidTeams-fallbackSequential', gmc: globalMatchCounter, teamA, teamB });
+        return { teamA, teamB };
+    }
+
+    let maxWaitingGlobal = Math.max(0, ...nonLockedPool.map(p => playerStats[p] ? (playerStats[p].waitingRounds || 0) : 0));
+
+    let bestCombos = [];
+    let bestScore = Infinity;
+    let combosEvaluated = 0;
+
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            for (let k = j + 1; k < n; k++) {
+                for (let l = k + 1; l < n; l++) {
+                    let four = [nonLockedPool[i], nonLockedPool[j], nonLockedPool[k], nonLockedPool[l]];
+                    let hasMaxWaiter = four.some(p => (playerStats[p] ? (playerStats[p].waitingRounds || 0) : 0) === maxWaitingGlobal);
+                    if (!hasMaxWaiter) continue; // Stage 4 generalized: ต้องมีคนรอสูงสุดอย่างน้อย 1 ใน 4
+
+                    let splits = [
+                        [[four[0], four[1]], [four[2], four[3]]],
+                        [[four[0], four[2]], [four[1], four[3]]],
+                        [[four[0], four[3]], [four[1], four[2]]],
+                    ];
+                    splits.forEach(([pairA, pairB]) => {
+                        combosEvaluated++;
+                        let histA = (historyPairs[pairA[0]] && historyPairs[pairA[0]][pairA[1]]) || 0;
+                        let histB = (historyPairs[pairB[0]] && historyPairs[pairB[0]][pairB[1]]) || 0;
+                        let freshA = (histA === coverage.playerMin[pairA[0]] || histA === coverage.playerMin[pairA[1]]);
+                        let freshB = (histB === coverage.playerMin[pairB[0]] || histB === coverage.playerMin[pairB[1]]);
+
+                        // Stage 5 generalized: ทั้ง 2 คู่ fresh ดีสุด > 1ใน2คู่ fresh > ไม่มีคู่ไหน fresh
+                        let freshPenalty = (freshA && freshB) ? 0 : (freshA || freshB) ? 50 : (100 + histA + histB);
+                        let waitSum = four.reduce((s, p) => s + (playerStats[p] ? (playerStats[p].waitingRounds || 0) : 0), 0);
+                        let score = freshPenalty - waitSum * 0.1; // waitSum เป็น tie-break อ่อนๆ (ยิ่งรอรวมกันมาก ยิ่งดี)
+
+                        if (score < bestScore) {
+                            bestScore = score;
+                            bestCombos = [{ teamA: pairA, teamB: pairB }];
+                        } else if (score === bestScore) {
+                            bestCombos.push({ teamA: pairA, teamB: pairB });
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    if (bestCombos.length === 0) {
+        let teamA = selectPairFromPool(nonLockedPool, []);
+        if (!teamA) {
+            __lastDeadlockReport = {
+                gmc: globalMatchCounter, type: 'fresh-selection-noComboFound-teamA-fail', minRequired: 2,
+                poolGot: nonLockedPool.length, nonLockedPool, fullPoolBeforeSplit: pool, excludeList,
+            };
+            return null;
+        }
+        let remaining = nonLockedPool.filter(p => !teamA.includes(p));
+        let teamB = selectPairFromPool(remaining, teamA);
+        if (!teamB) {
+            __lastDeadlockReport = {
+                gmc: globalMatchCounter, type: 'fresh-selection-noComboFound-teamB-fail', minRequired: 2,
+                poolGot: remaining.length, remaining, fixedTeamA: teamA, fullPoolBeforeSplit: pool, excludeList,
+            };
+            return null;
+        }
+        if (DEBUG_PIPELINE) pipelineLog.push({ stage: 'generateAllValidTeams-noComboFallback', gmc: globalMatchCounter, teamA, teamB });
+        return { teamA, teamB };
+    }
+
+    let chosen = bestCombos[Math.floor(Math.random() * bestCombos.length)];
+    if (DEBUG_PIPELINE) {
+        pipelineLog.push({ stage: 'generateAllValidTeams', gmc: globalMatchCounter, n, combosEvaluated, bestCombosCount: bestCombos.length, chosen, bestScore });
+    }
+    return chosen;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// END MATCHMAKING ENGINE V2 (Phase 1) — ยังไม่ถูกเรียกใช้จากที่ไหน
+// ════════════════════════════════════════════════════════════════════
+
     function recordPartnerships(teamA, teamB, skipTeamAPairHistory) {
         // historyPairs: นับปกติ ไม่ cap ที่นี่ → decay จัดการทุก DECAY_INTERVAL รอบแทน
         // [แก้ไข] เพิ่ม skipTeamAPairHistory: ใช้ตอนส่ง teamA=champTeam เข้ามาเพื่อให้ opponentHistory
