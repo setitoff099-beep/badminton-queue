@@ -345,6 +345,12 @@
     // --- เพิ่มโค้ดส่วนนี้ ---
     let cachedNextMatch = null;
 
+    // ═══ DEBUG MODE: ไม่กระทบ behavior เลยเมื่อปิด (default false) ═══
+    // เปิดได้จาก console: DEBUG_MATCHMAKING = true
+    // ดู log: console.table(matchmakingLog[matchmakingLog.length-1].candidates)
+    let DEBUG_MATCHMAKING = false;
+    let matchmakingLog = [];
+
     // [แก้ไข] ป้องกัน XSS: แปลงอักขระพิเศษ HTML ก่อนนำไปแสดงผลใน innerHTML
     function escapeHTML(str) {
         if (str === null || str === undefined) return '';
@@ -710,19 +716,24 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
             : [];
 
         if (mandatory.length >= 1) {
-            let mPairs;
-            if (mandatory.length >= 2) {
-                // 2+ mandatory → หา best pair จากกลุ่ม mandatory เท่านั้น
-                mPairs = [];
-                for (let i = 0; i < mandatory.length; i++) {
-                    for (let j = i+1; j < mandatory.length; j++) {
-                        mPairs.push([mandatory[i], mandatory[j]]);
+            // [แก้ไข Bug โครงสร้าง — พิสูจน์จาก debug log จริง]
+            // เดิม: ถ้า mandatory.length>=2 (เช่น เก้น,พี่กาย tie กันที่ waitingRounds สูงสุด)
+            //   จะสร้าง mPairs จาก "ภายในกลุ่ม mandatory เท่านั้น" → บังคับจับคู่กันเองเสมอ
+            //   ปิดโอกาสคู่ใหม่ทั้งหมดในสนาม แม้จะมีคู่ใหม่ (hist=0) เหลืออีกหลายสิบคู่
+            //   (เคสจริงที่เจอ: เก้น&พี่กาย ถูกบังคับจับคู่กัน ทั้งที่มีคู่ใหม่เหลือ 12 คู่)
+            // ใหม่: สร้าง mPairs จาก "ทุกคู่ที่มีสมาชิกอย่างน้อย 1 คนเป็น mandatory"
+            //   รับประกัน fairness (มี mandatory ได้ลงแน่นอน) แต่เปิดให้จับคู่กับคนสดใหม่ได้
+            //   ถ้ามี mandatory คนที่ไม่ได้ลงรอบนี้ waitingRounds เขาจะกลายเป็น max เดี่ยวในรอบหน้า
+            //   แล้วได้รับการจัดการแบบเดียวกันอีกครั้ง (ไม่มี edge case ตกหล่น)
+            let mandatorySet = new Set(mandatory);
+            let mPairs = [];
+            for (let i = 0; i < nonLockedPool.length; i++) {
+                for (let j = i + 1; j < nonLockedPool.length; j++) {
+                    let pi = nonLockedPool[i], pj = nonLockedPool[j];
+                    if (mandatorySet.has(pi) || mandatorySet.has(pj)) {
+                        mPairs.push([pi, pj]);
                     }
                 }
-            } else {
-                // 1 mandatory → เขาต้องได้ลง แต่หาคู่ให้เขาจาก nonLockedPool ทั้งหมด
-                let mandP = mandatory[0];
-                mPairs = nonLockedPool.filter(p => p !== mandP).map(p => [mandP, p]);
             }
 
             if (mPairs.length > 0) {
@@ -745,7 +756,26 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
                 let eligible = freshM.length > 0 ? freshM : scored;
                 let minSc = Math.min(...eligible.map(s => s.score));
                 let best = eligible.filter(s => s.score <= minSc + SCORE_TOLERANCE);
-                return best[Math.floor(Math.random() * best.length)].pair;
+                let chosen = best[Math.floor(Math.random() * best.length)].pair;
+
+                if (DEBUG_MATCHMAKING) {
+                    matchmakingLog.push({
+                        gmc: globalMatchCounter,
+                        path: 'FAIRNESS_GATE (รวม mandatory + คู่สดใหม่ที่เหลือทั้งหมด)',
+                        maxWaiting, mandatoryPlayers: mandatory,
+                        candidates: nonLockedPool.map(p => ({
+                            ชื่อ: p, waitingRounds: playerStats[p]?.waitingRounds || 0, mandatory: mandatory.includes(p),
+                        })),
+                        mPairsConsidered: scored,
+                        freshOptionsAvailable: freshM.length,
+                        selected: chosen,
+                        เหตุผล: freshM.length > 0
+                            ? `มี mandatory player (${mandatory.join(',')}) ต้องได้ลง → เลือกคู่สดใหม่ (hist=0) ที่ดีที่สุดจาก ${freshM.length} ตัวเลือกที่มี mandatory อยู่ด้วย`
+                            : `มี mandatory player (${mandatory.join(',')}) ต้องได้ลง → ไม่มีคู่สดใหม่เหลือ เลือกคู่เก่าที่ penalty ต่ำสุด`
+                    });
+                }
+
+                return chosen;
             }
         }
         // ─── END FAIRNESS GATE ──────────────────────────────────────────────────
@@ -818,14 +848,42 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
             // tiebreak ด้วย diversityBonus
             let minDiv = Math.min(...scoreFiltered.map(f => f.diversityBonus));
             let bestFresh = scoreFiltered.filter(f => f.diversityBonus <= minDiv + SCORE_TOLERANCE * 2);
-            return bestFresh[Math.floor(Math.random() * bestFresh.length)].pair;
+            let chosenFresh = bestFresh[Math.floor(Math.random() * bestFresh.length)].pair;
+
+            if (DEBUG_MATCHMAKING) {
+                matchmakingLog.push({
+                    gmc: globalMatchCounter,
+                    path: 'FRESH_PAIR (Tier 1, ไม่ผ่าน Fairness Gate)',
+                    candidates: freshPairs.map(f => ({
+                        คู่: f.pair.join('+'), oppScore: f.oppScore, recentOppPenalty: f.recentOppPenalty,
+                        benchTerm: f.benchTerm, diversityBonus: f.diversityBonus, recent: f.recent,
+                        freshScore: f.oppScore + f.recentOppPenalty + f.benchTerm
+                    })),
+                    selected: chosenFresh,
+                    เหตุผล: `เลือกจากคู่ใหม่ (hist=0) ที่มี oppScore+recentOppPenalty+benchTerm ต่ำสุด`
+                });
+            }
+
+            return chosenFresh;
         }
 
         // Tier 2: ไม่มีคู่ใหม่แล้ว → เลือกคู่เก่าที่ score ต่ำสุด + SCORE_TOLERANCE
         if (allUsedPairs.length > 0) {
             let minScore = Math.min(...allUsedPairs.map(p => p.score));
             let eligible = allUsedPairs.filter(p => p.score <= minScore + SCORE_TOLERANCE);
-            return eligible[Math.floor(Math.random() * eligible.length)].pair;
+            let chosenUsed = eligible[Math.floor(Math.random() * eligible.length)].pair;
+
+            if (DEBUG_MATCHMAKING) {
+                matchmakingLog.push({
+                    gmc: globalMatchCounter,
+                    path: 'USED_PAIR (Tier 2, ไม่มีคู่ใหม่เหลือใน pool นี้แล้ว)',
+                    candidates: allUsedPairs.map(p => ({ คู่: p.pair.join('+'), score: p.score })),
+                    selected: chosenUsed,
+                    เหตุผล: `ไม่มีคู่ hist=0 เหลือใน nonLockedPool แล้ว → เลือกคู่เก่าที่ penalty ต่ำสุด`
+                });
+            }
+
+            return chosenUsed;
         }
     }
 
@@ -894,9 +952,12 @@ function optimizeFourPlayers(pArr) {
     return bestCombos[Math.floor(Math.random() * bestCombos.length)];
 }
 
-    function recordPartnerships(teamA, teamB) {
+    function recordPartnerships(teamA, teamB, skipTeamAPairHistory) {
         // historyPairs: นับปกติ ไม่ cap ที่นี่ → decay จัดการทุก DECAY_INTERVAL รอบแทน
-        if (teamA && teamA.p1 && teamA.p2) {
+        // [แก้ไข] เพิ่ม skipTeamAPairHistory: ใช้ตอนส่ง teamA=champTeam เข้ามาเพื่อให้ opponentHistory
+        // ทำงาน (ต้องการทั้ง teamA และ teamB ไม่ใช่ null) แต่ไม่อยากนับ historyPairs ของ champ ซ้ำ
+        // (เพราะ champ ถูกนับไปแล้วตอนถูกเลือกครั้งแรก)
+        if (teamA && teamA.p1 && teamA.p2 && !skipTeamAPairHistory) {
             historyPairs[teamA.p1][teamA.p2] = (historyPairs[teamA.p1][teamA.p2] || 0) + 1;
             historyPairs[teamA.p2][teamA.p1] = (historyPairs[teamA.p2][teamA.p1] || 0) + 1;
             // บันทึก recentPairs สำหรับ anti-repeat รอบสั้น (tag ด้วย gmc เพื่อกรองตามเวลาจริง)
@@ -1300,10 +1361,12 @@ function optimizeFourPlayers(pArr) {
                 } else {
                     court.teamB = champTeam; court.teamA = challengerTeam;
                 }
-                // [แก้ไข] นับการจับคู่เฉพาะทีมผู้ท้าชิงเท่านั้น
-                // ทีมแชมป์ถูกนับไปแล้วตอนที่ถูกเลือกในรอบแรก
-                // ถ้านับซ้ำ: คู่ที่ครองแชมป์ 2 สมัย จะถูกนับ hist=2 แทนที่จะเป็น 1
-                recordPartnerships(null, challengerTeam);
+                // [แก้ไข Bug] เดิมส่ง null เป็น teamA → opponentHistory ไม่ถูกบันทึกเลย
+                // เพราะฟังก์ชันเช็ค if(teamA && teamB) ซึ่งเป็น false ตลอดเมื่อ teamA=null
+                // ผลคือ Champion Bias "บอด" ทุกครั้งที่แชมป์อยู่ต่อ (เคสส่วนใหญ่ของระบบ king-of-hill)
+                // แก้: ส่ง champTeam จริงเข้าไป (ให้ opponentHistory ทำงาน) แต่ skip historyPairs
+                // ของ champTeam ไม่ให้นับซ้ำ (เพราะนับไปแล้วตอนถูกเลือกเป็นแชมป์ครั้งแรก)
+                recordPartnerships(champTeam, challengerTeam, true);
             }
             
             // isChampOut: บันทึกทั้งสองทีม (ทั้งคู่ถูกเลือกมาใหม่ในรอบนี้)
