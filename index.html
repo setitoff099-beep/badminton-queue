@@ -630,8 +630,16 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
 
     // แยก "พักพอ" กับ "เพิ่งแพ้"
     let restedPool = validRawPool.filter(p => playerStats[p] && playerStats[p].lastBenchTime <= globalMatchCounter);
-    let pool = (restedPool.length >= reqCount || (restedPool.length === 1 && validRawPool.length === 1))
-        ? restedPool : validRawPool;
+    // [แก้ไข Rule 1 — Just Played / Minimum Necessary Override]
+    // เดิม fallback: restedPool ไม่พอ → ใช้ validRawPool "ทั้งก้อน" ทันที (ทิ้งการกันคนเพิ่งลงทั้งหมด)
+    //   ผลคือ Immediate Replay: ดึงคนเพิ่งลง 2 คนได้ ทั้งที่ควรดึงเท่าที่จำเป็นเท่านั้น
+    // ใหม่: เพราะ validRawPool ถูก sortByPriority (lastBenchTime น้อย→มาก) แล้ว คนพักพอ (rested)
+    //   จึงเป็น "prefix" ของ validRawPool เสมอ และคนเพิ่งลง (lastBenchTime = gmc+1) เป็น suffix เสมอ
+    //   → slice(0, max(reqCount, restedPool.length)) = restedPool ทั้งหมด + คนเพิ่งลง "เท่าที่ขาด" เท่านั้น
+    //     - restedPool พอ (>= reqCount): slice = restedPool (ผลลัพธ์เท่าเดิมทุกประการ)
+    //     - restedPool ไม่พอ: เติมคนเพิ่งลงที่ "พักนานสุดในกลุ่มเพิ่งลง" ทีละคนจนครบ (Minimum Necessary)
+    //     - คนทั้งหมดไม่ถึง reqCount: slice = validRawPool ทั้งหมด (Availability floor เท่าเดิม)
+    let pool = validRawPool.slice(0, Math.max(reqCount, restedPool.length));
 
 
     if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : validRawPool.slice(0, 1);
@@ -688,8 +696,15 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
 
     // [แก้ไข] ถ้า nonLockedPool < 2 คน ให้ขยายหาจาก validRawPool ด้วย
     // เพื่อป้องกัน fallback ที่อาจดึง locked player มาจับกับคนที่ไม่ใช่คู่ล็อค
+    // [แก้ไข Rule 1 — ปิดช่องทางที่ยัง bypass patch แล้วดึง validRawPool ทั้งก้อน]
+    //   เดิมดึงคนไม่ล็อคจาก validRawPool "ทั้งหมด" (รวมคนเพิ่งลงทุกคน) → ยังเกิด Immediate Replay ได้
+    //   ใหม่: ดึง "เท่าที่ขาดให้ครบ 2" เท่านั้น และเพราะ validRawPool เรียง lastBenchTime แล้ว
+    //   คนที่ถูกดึงจึงเป็นคนพักนานสุดก่อนเสมอ (Availability คงเดิม: ครบ 2 ก็ต่อเมื่อของเดิมก็ครบ)
     if (nonLockedPool.length < 2) {
-        let extra = validRawPool.filter(p => !lockedPairs[p] && !nonLockedPool.includes(p));
+        let needMore = 2 - nonLockedPool.length;
+        let extra = validRawPool
+            .filter(p => !lockedPairs[p] && !nonLockedPool.includes(p))
+            .slice(0, Math.max(0, needMore));
         nonLockedPool = [...nonLockedPool, ...extra];
     }
 
