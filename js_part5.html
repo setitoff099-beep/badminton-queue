@@ -1,0 +1,471 @@
+<!-- index.html — JavaScript ส่วนที่ 5/6 (โค้ดเดิมบรรทัด 1929-2396) -->
+<script>
+    function togglePlayerBreak(name) {
+        clearPreviewCache();
+        let onCourt = false;
+        courts.forEach(c => {
+            if(!c.isPaused && ((c.teamA && (c.teamA.p1 === name || c.teamA.p2 === name)) || 
+               (c.teamB && (c.teamB.p1 === name || c.teamB.p2 === name)))) onCourt = true;
+        });
+
+        if(onCourt) { 
+            alert('ไม่สามารถเปิดโหมดพักให้กับผู้เล่นที่กำลังตีอยู่ในสนามได้ครับ 🏸'); 
+            return; 
+        }
+
+        if(!playerStats[name]) playerStats[name] = {};
+        playerStats[name].onBreak = !playerStats[name].onBreak;
+        
+        let statusTxt = playerStats[name].onBreak ? "กำลังนั่งพัก 🛌" : "กลับเข้าคิวแล้ว 🟢";
+        alert(`อัปเดตสถานะ: ${name} ${statusTxt}`);
+        
+        renderAll();
+        saveData();
+    }
+
+    window.generateNextPreview = function() {
+            let pool = getAvailablePlayers([]);
+            let box = document.getElementById('nextUpPreviewBox');
+            
+            if (pool.length < 2) {
+                box.innerHTML = `<div style="background: #fef2f2; padding: 12px; border-radius: 8px; border: 1px solid #fecaca; font-size: 13px; color: #b91c1c;">❌ <strong>ยังไม่สามารถจัดคู่ล่วงหน้าได้:</strong> มีผู้เล่นว่างรออยู่ข้างสนามไม่ถึง 2 คน</div>`;
+                cachedNextMatch = null; // ล้างค่าทิ้งถ้าคนไม่พอ
+                return;
+            }
+
+            let teamChallenger = selectTeam([]);
+            let display1 = `<span style="color:#3b82f6;">${getDisplayName(teamChallenger[0])} & ${getDisplayName(teamChallenger[1])}</span>`;
+            let display2 = `<span style="color:#94a3b8; font-size:13px; font-weight:normal;">(ยังคำนวณไม่ได้: ต้องมีคนรอคิว 4 คนขึ้นไป)</span>`;
+            
+            let fullMatchObj = null;
+
+            if (pool.length >= 4) {
+                let tA = selectTeam([]);
+                let tB = selectTeam([tA[0], tA[1]]);
+                let optimized = optimizeFourPlayers([tA[0], tA[1], tB[0], tB[1]]);
+                fullMatchObj = optimized;
+                display2 = `<span style="color:#3b82f6;">${getDisplayName(optimized.teamA[0])} & ${getDisplayName(optimized.teamA[1])}</span> <span style="color: #94a3b8; font-weight: normal; margin: 0 10px;">VS</span> <span style="color:#ef4444;">${getDisplayName(optimized.teamB[0])} & ${getDisplayName(optimized.teamB[1])}</span>`;
+            }
+            
+            // บันทึกค่าลงความจำ
+            cachedNextMatch = {
+                challengers: teamChallenger,
+                fullMatch: fullMatchObj
+            };
+            
+            box.innerHTML = `
+                <div style="background: #f0fdf4; padding: 12px; border-radius: 8px; border: 1px solid #bbf7d0; font-size: 13px; color: #166534; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                    <strong style="display:block; margin-bottom:6px;">🏸 กรณีหาผู้ท้าชิงแชมป์:</strong>
+                    <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #dcfce3;">${display1}</div>
+                </div>
+                <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; color: #334155; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                    <strong style="display:block; margin-bottom:6px;">⚔️ กรณีล้างสนามจัดใหม่ (ประเภทคู่):</strong>
+                    <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #f1f5f9;">${display2}</div>
+                </div>`;
+        }
+
+    function lockPair() {
+        clearPreviewCache();
+        let p1 = document.getElementById('lockP1').value;
+        let p2 = document.getElementById('lockP2').value;
+        if (!p1 || !p2) return alert('กรุณาเลือกผู้เล่นให้ครบ 2 คนครับ');
+        if (p1 === p2) return alert('ไม่สามารถล็อคคู่กับตัวเองได้ครับ');
+        if (lockedPairs[p1] || lockedPairs[p2]) return alert('มีผู้เล่นติดสถานะล็อคคู่กับคนอื่นอยู่แล้ว');
+        
+        lockedPairs[p1] = p2; lockedPairs[p2] = p1;
+        
+        courts.forEach((c, index) => {
+            if (c.isPaused) return;
+            let checkOnCourt = p => (c.teamA && (c.teamA.p1 === p || c.teamA.p2 === p)) || (c.teamB && (c.teamB.p1 === p || c.teamB.p2 === p));
+            if (checkOnCourt(p1) || checkOnCourt(p2)) rePairCourtMatch(index, true);
+        });
+
+        renderAll(); saveData();
+    }
+
+    function unlockPair(p1) {
+        clearPreviewCache();
+        let p2 = lockedPairs[p1];
+        delete lockedPairs[p1]; if (p2) delete lockedPairs[p2];
+        renderAll(); saveData();
+    }
+
+    function getDisplayName(p) { 
+        if(!p) return '';
+        return lockedPairs[p] ? `${p}🔒` : p; 
+    }
+
+    function addNewPlayer() {
+        clearPreviewCache();
+        let name = document.getElementById('newPlayerInput').value.trim();
+        if(!name) return;
+        if(players.includes(name)) return alert('ชื่อนี้มีอยู่ในระบบแล้วครับ');
+
+        let minPlayed = players.length > 0 ? Math.min(...players.map(p => playerStats[p].played)) : 0;
+        let timeNow = getCurrentTimeStr();
+
+        // [หมายเหตุ] ตั้ง played เท่ากับ minPlayed เพื่อให้ระบบดึงคนใหม่ลงสนามก่อน
+        // wins/losses ตั้งเป็น 0 ไว้ก่อน เพราะยังไม่มีประวัติการแข่ง (Win Rate จะถูกต้องหลังแข่งครั้งแรก)
+        players.push(name); historyPairs[name] = {}; 
+        playerStats[name] = { played: minPlayed, wins: 0, losses: 0, waitingRounds: 0, arrivalTime: timeNow, lastBenchTime: 0, onBreak: false };
+        players.forEach(p => { if(p !== name) { if(!historyPairs[p]) historyPairs[p] = {}; historyPairs[p][name] = 0; historyPairs[name][p] = 0; } });
+        if (!opponentHistory[name]) opponentHistory[name] = {};
+        players.forEach(p => { if(p !== name) { if(!opponentHistory[p]) opponentHistory[p] = {}; opponentHistory[p][name] = opponentHistory[p][name] || 0; opponentHistory[name][p] = opponentHistory[name][p] || 0; } });
+
+        eliminatedOrder.push(name); 
+        document.getElementById('newPlayerInput').value = '';
+        renderAll(); saveData();
+    }
+
+    function removePlayer() {
+        clearPreviewCache();
+        let name = document.getElementById('removePlayerSelect').value;
+        if(!name) return;
+        
+        let onCourt = false;
+        courts.forEach(c => {
+            if(!c.isPaused && ((c.teamA && (c.teamA.p1 === name || c.teamA.p2 === name)) || 
+               (c.teamB && (c.teamB.p1 === name || c.teamB.p2 === name)))) onCourt = true;
+        });
+
+        if(onCourt) return alert('ไม่สามารถลบผู้เล่นที่กำลังยืนอยู่ในสนามได้ครับ กรุณารอให้จบแมตช์ก่อน');
+
+        players = players.filter(p => p !== name);
+        mainQueue = mainQueue.filter(p => p !== name);
+        eliminatedOrder = eliminatedOrder.filter(p => p !== name);
+        if (lockedPairs[name]) unlockPair(name);
+
+        renderAll(); saveData();
+    }
+
+    function exportSummary() {
+        if(players.length === 0 || matchHistory.length === 0) return alert('ยังไม่มีข้อมูลการแข่งขันให้สรุปครับ');
+        
+        let statArr = players.map(p => {
+            let total = playerStats[p].played;
+            let w = playerStats[p].wins;
+            let winRate = total > 0 ? Math.round((w / total) * 100) : 0;
+            return { name: p, played: total, wins: w, losses: playerStats[p].losses, winRate: winRate };
+        });
+
+        statArr.sort((a, b) => b.wins - a.wins || b.winRate - a.winRate);
+        let mvp = statArr[0];
+
+        document.getElementById('exportMVP').innerText = mvp.name;
+        document.getElementById('exportMVPStat').innerText = `ชนะ ${mvp.wins} เกม (Win Rate ${mvp.winRate}%)`;
+
+        let tbodyHtml = '';
+        statArr.forEach(s => {
+            tbodyHtml += `<tr>
+                <td style="text-align:left;">${s.name}</td>
+                <td style="text-align:center;">${s.played}</td>
+                <td style="text-align:center; color:#10b981;">${s.wins}</td>
+                <td style="text-align:center; color:#ef4444;">${s.losses}</td>
+                <td style="text-align:right;">${s.winRate}%</td>
+            </tr>`;
+        });
+        document.querySelector('#exportStatTable tbody').innerHTML = tbodyHtml;
+
+        let el = document.getElementById('exportCard');
+        el.style.left = '0'; el.style.top = '0'; 
+        
+        html2canvas(el, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
+            let link = document.createElement('a');
+            link.download = `badminton_summary_${new Date().getTime()}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
+            el.style.left = '-9999px'; el.style.top = '-9999px'; 
+        });
+    }
+
+    function goToBilling() {
+            if(players.length === 0) {
+                alert("ยังไม่มีผู้เล่นในระบบครับ กรุณาเริ่มการแข่งขันก่อน");
+                return;
+            }
+            
+            let billingData = players.map(p => {
+                return {
+                    name: p,
+                    joinTime: (playerStats[p] && playerStats[p].arrivalTime) ? playerStats[p].arrivalTime : (startTimeExact || getCurrentTimeStr())
+                };
+            });
+
+            localStorage.setItem('badminton_billing_players', JSON.stringify(billingData));
+            if(startTimeCalculated) localStorage.setItem('badminton_billing_start_time', startTimeCalculated);
+            window.location.href = 'billing.html'; 
+        }
+
+    function renderAll() {
+        let courtsHtml = '';
+        courts.forEach((court, i) => {
+            // เช็คสถานะพักคอร์ท
+            if (court.isPaused) {
+                courtsHtml += `
+                <div class="court-wrapper court-paused">
+                    <div class="court-title">${court.name} (พักการใช้งาน)</div>
+                    <div class="paused-overlay">
+                        <div style="font-size: 40px; margin-bottom: 10px;">⏸️</div>
+                        <strong style="color: #334155;">คอร์ทนี้ถูกพักการใช้งานชั่วคราว</strong>
+                        <p style="margin-top: 5px; font-size: 13px;">ระบบจะไม่จ่ายคนลงสนามนี้จนกว่าจะกดเปิดคอร์ท</p>
+                        <button class="btn-resume protected-btn" onclick="togglePauseCourt(${i})">▶️ เปิดคอร์ท & ดึงคนลงอัตโนมัติ</button>
+                    </div>
+                </div>`;
+                return; // ข้ามการ render ส่วนอื่นๆ ของคอร์ทนี้ไปเลย
+            }
+
+            let targetWin = court.winScore || winScore;
+            let targetChamp = court.maxChamps || maxChamps;
+
+            let titleText = `รอบที่ ${court.matchRound}`;
+            if (court.scoreA >= (targetWin - 1) && court.scoreB >= (targetWin - 1) && court.scoreA === court.scoreB) titleText += " (ดิวส์)";
+
+            let champA = "", champB = "", clsA = "", clsB = "";
+            if(court.currentChamp) {
+                let isA = court.currentChamp.p1 === court.teamA.p1 || (court.teamA.p2 && court.currentChamp.p1 === court.teamA.p2);
+                let isB = court.currentChamp.p1 === court.teamB.p1 || (court.teamB.p2 && court.currentChamp.p1 === court.teamB.p2);
+                if(isA) { clsA="champ"; champA=`<div class="champ-badge">แชมป์เก่า (${court.currentChamp.count}/${targetChamp})</div>`; }
+                if(isB) { clsB="champ"; champB=`<div class="champ-badge">แชมป์เก่า (${court.currentChamp.count}/${targetChamp})</div>`; }
+            }
+
+            let modeSelectHtml = `
+                <select class="protected-btn" onchange="changeCourtMode(${i}, this.value)" style="margin-right: 10px; padding: 6px 10px; border-radius: 6px; font-size: 13px; background: #f8fafc; border: 1px solid #cbd5e1; font-weight:bold; color:var(--dark); outline:none; cursor:pointer;">
+                    <option value="doubles" ${(!court.matchType || court.matchType === 'doubles') ? 'selected' : ''}>🏸 คู่ (2v2)</option>
+                    <option value="singles" ${court.matchType === 'singles' ? 'selected' : ''}>🏃‍♂️ เดี่ยว (1v1)</option>
+                </select>
+            `;
+
+            let controlsHtml = '';
+            if (court.isGameOver) {
+                controlsHtml = `
+                    <div style="display:flex; gap:10px; width:100%; margin-top:15px; justify-content:center;">
+                        <button class="btn-success protected-btn" onclick="prepareNextMatch(${i})" style="width:auto; margin:0; padding:10px 20px;">สุ่มดึงคู่ลงสนาม (${court.name})</button>
+                        <button class="btn-secondary protected-btn" onclick="undoFinishMatch(${i})" style="width:auto; margin:0; padding:10px 20px; background:#94a3b8;">ย้อนกลับ</button>
+                    </div>`;
+            } else {
+                        // เช็คว่ามีประวัติให้ย้อนหรือไม่ ถ้ามีให้แสดงปุ่ม
+                        let undoBtnHtml = court.stateBeforeFinishStr ? `<button class="btn-secondary protected-btn" onclick="undoFinishMatch(${i})" style="background:#ef4444; color:white; border:none; padding:6px 12px; border-radius:6px; font-size:13px; font-weight:bold; cursor:pointer; width:auto; margin:0;">⏪ ย้อนผล</button>` : '';
+
+                        controlsHtml = `
+                            <div class="court-controls">
+                                <span style="font-size:14px; color:#64748b; font-weight:bold;">${titleText} (จบ ${targetWin} แต้ม)</span>
+                                <div style="display:flex; align-items:center; gap: 8px;">
+                                    ${modeSelectHtml}
+                                    <button class="btn-repair protected-btn" onclick="rePairCourtMatch(${i}, false)">🔄 จัดใหม่</button>
+                                    <button class="btn-pause protected-btn" onclick="togglePauseCourt(${i})">⏸️ พักคอร์ท</button>
+                                    ${undoBtnHtml}
+                                </div>
+                            </div>`;
+                    }
+
+            let getFullName = (team) => team.p2 ? `${getDisplayName(team.p1)} & ${getDisplayName(team.p2)}` : getDisplayName(team.p1);
+            let nameA = (court.matchType === 'singles') ? getDisplayName(court.teamA.p1) : getFullName(court.teamA);
+            let nameB = (court.matchType === 'singles') ? getDisplayName(court.teamB.p1) : getFullName(court.teamB);
+
+            courtsHtml += `
+            <div class="court-wrapper">
+                <div class="court-title">${court.name}</div>
+                <div class="match-board">
+                    <div class="team-box protected-btn ${clsA}" onclick="addScore(${i}, 'A')">
+                        <div class="player-names">${nameA}</div>
+                        ${champA}
+                        <div class="score">${court.scoreA}</div>
+                        <button class="btn-minus protected-btn" onclick="decreaseScore(${i}, 'A', event)">-1 ลดแต้ม</button>
+                    </div>
+                    <div class="versus">VS</div>
+                    <div class="team-box protected-btn ${clsB}" onclick="addScore(${i}, 'B')">
+                        <div class="player-names">${nameB}</div>
+                        ${champB}
+                        <div class="score">${court.scoreB}</div>
+                        <button class="btn-minus protected-btn" onclick="decreaseScore(${i}, 'B', event)">-1 ลดแต้ม</button>
+                    </div>
+                </div>
+                ${controlsHtml}
+            </div>`;
+        });
+        document.getElementById('courtsContainer').innerHTML = courtsHtml;
+
+        let queueHtml = mainQueue.map(p => {
+            let isBreak = playerStats[p] && playerStats[p].onBreak;
+            let breakClass = isBreak ? 'tag-break' : '';
+            let statusSign = isBreak ? ' 🛌' : '';
+            return `<span class="tag ${breakClass}">${getDisplayName(p)}${statusSign}</span>`;
+        }).join(' ') || "-";
+        document.getElementById('queueList').innerHTML = queueHtml;
+
+        let elimHtml = eliminatedOrder.map(p => {
+            let isBreak = playerStats[p] && playerStats[p].onBreak;
+            let breakClass = isBreak ? 'tag-break' : '';
+            let statusSign = isBreak ? ' 🛌' : '';
+            return `<span class="tag ${breakClass}">${getDisplayName(p)}${statusSign}</span>`;
+        }).join(' ') || "-";
+        document.getElementById('eliminatedList').innerHTML = elimHtml;
+        
+        let breakSelectHtml = '<option value="">-- เลือกผู้เล่น --</option>';
+        players.forEach(p => {
+            let status = (playerStats[p] && playerStats[p].onBreak) ? ' (สถานะ: พักอยู่)' : '';
+            breakSelectHtml += `<option value="${p}">${p}${status}</option>`;
+        });
+        let manualBreakEl = document.getElementById('manualBreakSelect');
+        if(manualBreakEl) manualBreakEl.innerHTML = breakSelectHtml;
+        
+        document.querySelector('#playerStatTable tbody').innerHTML = players.map(p => 
+            `<tr>
+                <td style="text-align:left; font-weight:bold;">${getDisplayName(p)}${(playerStats[p] && playerStats[p].onBreak) ? ' 🛌' : ''}</td>
+                <td style="color:#475569; font-weight:bold;">${playerStats[p].arrivalTime || '-'}</td>
+                <td>${playerStats[p].played}</td>
+                <td style="color:var(--success);">${playerStats[p].wins}</td>
+                <td style="color:var(--danger);">${playerStats[p].losses}</td>
+            </tr>`
+        ).join('');
+        
+        let historyHtml = '';
+        courts.forEach((court) => {
+            let courtHistory = matchHistory.filter(h => h.courtName === court.name).reverse();
+            let headColor = court.id === 0 ? 'var(--primary)' : 'var(--success)';
+            
+            historyHtml += `
+            <div style="flex: 1; min-width: 280px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #fff;">
+                <div style="background: ${headColor}; color: white; padding: 10px; text-align: center; font-weight: bold;">
+                    ประวัติ - ${court.name}
+                </div>
+                <div style="max-height: 250px; overflow-y: auto;">
+                    <table style="margin-top: 0; border-radius: 0;">
+                        <thead style="position: sticky; top: 0; background: #f1f5f9;">
+                            <tr><th style="width:20%; color:#475569;">รอบ</th><th style="color:#475569;">ผลการแข่งขัน</th></tr>
+                        </thead>
+                        <tbody>
+                            ${courtHistory.length > 0 
+                                ? courtHistory.map(h => `<tr><td>${h.round}</td><td style="text-align:left;">${h.result}</td></tr>`).join('') 
+                                : `<tr><td colspan="2" style="color:#94a3b8; padding: 15px;">ยังไม่มีข้อมูลการแข่งขัน</td></tr>`}
+                        </tbody>
+                    </table>
+                </div>
+            </div>`;
+        });
+        document.getElementById('historyContainer').innerHTML = historyHtml;
+
+        let optionsHtml = players.map(p => `<option value="${p}">${p}</option>`).join('');
+        document.getElementById('removePlayerSelect').innerHTML = `<option value="">-- เลือกผู้เล่น --</option>` + optionsHtml;
+        document.getElementById('lockP1').innerHTML = `<option value="">-- คนที่ 1 --</option>` + optionsHtml;
+        document.getElementById('lockP2').innerHTML = `<option value="">-- คนที่ 2 --</option>` + optionsHtml;
+
+        let lphtml = ""; let seen = new Set();
+        for (let p in lockedPairs) {
+            if (!seen.has(p)) {
+                let partner = lockedPairs[p]; seen.add(p); seen.add(partner);
+                lphtml += `<div style="display:flex; justify-content:space-between; align-items:center; background:white; padding:8px 12px; border-radius:6px; margin-bottom:8px; font-size:14px; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+                    <span>🔒 <strong>${p}</strong> & <strong>${partner}</strong></span>
+                    <button onclick="unlockPair('${p}')" class="protected-btn" style="width:auto; margin:0; padding:4px 10px; font-size:12px; background:var(--danger);">ปลด</button>
+                </div>`;
+            }
+        }
+        document.getElementById('lockedPairsList').innerHTML = lphtml || `<p style="color:#94a3b8; font-size:13px; margin:0; text-align:center;">ยังไม่มีการล็อคคู่ในขณะนี้</p>`;
+
+        let mhtml = `<table><thead><tr><th>ผู้เล่น</th>`;
+        players.forEach(p => { mhtml += `<th>${getDisplayName(p)}</th>`; });
+        mhtml += `</tr></thead><tbody>`;
+        players.forEach(p1 => {
+            mhtml += `<tr><td style="text-align:left; font-weight:bold; background:#f8fafc;">${getDisplayName(p1)}</td>`;
+            players.forEach(p2 => {
+                if (p1 === p2) mhtml += `<td class="matrix-self">-</td>`;
+                else mhtml += `<td>${(historyPairs[p1] && historyPairs[p1][p2]) || 0}</td>`;
+            });
+            mhtml += `</tr>`;
+        });
+        mhtml += `</tbody></table>`;
+        document.getElementById('matrixTableContainer').innerHTML = mhtml;
+
+        if (startTimeExact && startTimeCalculated) {
+            const timeEl = document.getElementById('timeDisplay');
+            timeEl.style.display = 'inline-block';
+            timeEl.innerHTML = `⏱️ เริ่มเล่นจริง: <strong style="color:var(--dark);">${startTimeExact}</strong> น. <span style="margin:0 8px; color:#cbd5e1;">|</span> 💰 เริ่มคิดเงิน: <strong style="color:var(--primary);">${startTimeCalculated}</strong> น.`;
+        }
+        updateLockStatus();
+    }
+
+    function createDeepSnapshot() {
+            // ลบ stateBeforeFinishStr ออกก่อนแปลงเป็น JSON เพื่อป้องกัน Memory Leak จากการเซฟซ้อนทับกัน
+            let cleanCourts = courts.map(c => {
+                let clone = { ...c };
+                clone.stateBeforeFinishStr = null; 
+                return clone;
+            });
+
+            return JSON.stringify({ 
+                players, mainQueue, historyPairs, opponentHistory, recentPairs, recentOpponents, eliminatedOrder, 
+                matchHistory, playerStats, lockedPairs, numCourts, 
+                winScore, maxChamps, courts: cleanCourts,
+                startTimeExact, startTimeCalculated, globalMatchCounter
+            });
+        }
+
+    function restoreSnapshot(st) {
+            players = st.players || []; 
+            mainQueue = st.mainQueue || []; 
+            historyPairs = st.historyPairs || {};
+            opponentHistory = st.opponentHistory || {};
+            recentPairs = st.recentPairs || [];
+            recentOpponents = st.recentOpponents || [];
+            eliminatedOrder = st.eliminatedOrder || []; 
+            matchHistory = st.matchHistory || []; 
+            playerStats = st.playerStats || {};
+            lockedPairs = st.lockedPairs || {}; 
+            numCourts = st.numCourts || 1; 
+            winScore = st.winScore || 21; 
+            maxChamps = st.maxChamps || 1; 
+            startTimeExact = st.startTimeExact || null;
+            startTimeCalculated = st.startTimeCalculated || null;
+            globalMatchCounter = st.globalMatchCounter || 0;
+            
+            // 🔥 จุดสำคัญ: แอบเก็บข้อมูลคอร์ทที่มีปุ่มย้อนผลของเครื่องตัวเองเอาไว้ก่อนโดน Firebase ทับ
+            let oldCourts = courts;
+            
+            courts = st.courts || [];
+            courts.forEach((c, idx) => {
+                if (c.winScore === undefined) c.winScore = winScore;
+                if (c.maxChamps === undefined) c.maxChamps = maxChamps;
+                if (c.isPaused === undefined) c.isPaused = false;
+                
+                // 🔥 รักษาหน่วยความจำ "ย้อนผล" ของเครื่องตัวเองไว้ (ไม่โดนล้างเวลาออนไลน์)
+                if (oldCourts[idx] && oldCourts[idx].stateBeforeFinishStr) {
+                    c.stateBeforeFinishStr = oldCourts[idx].stateBeforeFinishStr;
+                }
+            });
+        }
+
+    window.restoreFromCloud = function(data) {
+        restoreSnapshot(data);
+        document.getElementById('setupSection').classList.remove('active');
+        document.getElementById('gameSection').classList.add('active');
+        renderAll();
+    };
+
+    function saveData() {
+        let snapshot = createDeepSnapshot();
+        // [แก้ไข] เซฟลง localStorage ด้วยทุกครั้ง เพื่อให้โหลดได้ทันทีตอนรีโหลดหน้า ไม่ต้องรอ Firebase
+        localStorage.setItem('badminton_game_state', snapshot);
+        if (window.saveToCloud) window.saveToCloud(snapshot);
+    }
+
+    function clearSavedData() {
+        if(confirm('ต้องการล้างข้อมูลเพื่อเริ่มตั้งค่าใหม่ทั้งหมดใช่หรือไม่? (ข้อมูลจะถูกลบในทุกเครื่อง)')) {
+            // [แก้ไข] ล้าง localStorage ด้วยเสมอ ไม่ใช่แค่ Firebase
+            localStorage.removeItem('badminton_game_state');
+            if(window.clearCloudData) window.clearCloudData(); 
+            else window.location.href = 'index.html';
+        }
+    }
+
+    function archiveCurrentSession() {
+        if (players.length === 0 && matchHistory.length === 0) return; 
+        let currentState = createDeepSnapshot();
+        let historyStr = localStorage.getItem('badminton_past_sessions');
+        let historyList = historyStr ? JSON.parse(historyStr) : [];
+        let dateStr = new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+        historyList.unshift({ id: Date.now(), date: dateStr, matchCount: matchHistory.length, playerCount: players.length, snapshot: currentState }); 
+        if (historyList.length > MAX_HISTORY) historyList = historyList.slice(0, MAX_HISTORY); 
+        localStorage.setItem('badminton_past_sessions', JSON.stringify(historyList));
+    }
+
+</script>
