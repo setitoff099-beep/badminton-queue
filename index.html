@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ระบบจัดคิวแบดมินตันส่วนตัว v2.2 (Online)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <?!= include('page_css'); ?>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
@@ -195,13 +195,14 @@
     </div>
 </div>
 
-    <?!= include('js_part1'); ?>
-    <?!= include('js_part2'); ?>
-    <?!= include('js_part3'); ?>
-    <?!= include('js_part4'); ?>
-    <?!= include('js_part5'); ?>
-    <?!= include('js_part6'); ?>
+    <script src="js/part1.js"></script>
+    <script src="js/part2.js"></script>
+    <script src="js/part3.js"></script>
+    <script src="js/part4.js"></script>
+    <script src="js/part5.js"></script>
+    <script src="js/part6.js"></script>
 
-    <?!= include('firebase_module'); ?>
+    <script type="module" src="js/firebase.js"></script>
 
 </body>
+</html>
