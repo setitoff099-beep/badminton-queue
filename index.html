@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบจัดคิวแบดมินตันส่วนตัว v2.2 (Online)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="container">
+    <div id="setupSection" class="setup-section active">
+        <h1>ระบบจัดคิวแบดมินตัน v2.2 (Online)</h1>
+        <div id="singleModeBanner" style="display:none; background:#fef3c7; border:1px solid #fde68a; border-radius:8px; padding:10px 15px; margin-bottom:16px; color:#92400e; font-size:14px; font-weight:bold;">
+            ⚡ โหมด 1 แชมป์ — ระบบจะบังคับให้แชมป์ลงแข่งได้ครั้งเดียวแล้วต้องลงมาพักเสมอ
+        </div>
+        <div class="form-group">
+            <label>1. จำนวนคอร์ทที่เปิดเล่น:</label>
+            <select id="numCourtsSetting">
+                <option value="1">1 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 4 คน)</option>
+                <option value="2">2 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 8 คน)</option>
+                <option value="3">3 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 12 คน)</option>
+                <option value="4">4 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 16 คน)</option>
+                <option value="5">5 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 20 คน)</option>
+                <option value="6">6 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 24 คน)</option>
+                <option value="7">7 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 28 คน)</option>
+                <option value="8">8 สนาม (ใช้ผู้เล่นเริ่มต้นอย่างน้อย 32 คน)</option>
+            </select>
+        </div>
+        <div class="form-group">
+                    <label>2. กรอกรายชื่อผู้เล่นตั้งต้น (1 ชื่อต่อ 1 บรรทัด):
+                        <br><span style="font-size:12px; color:var(--primary); font-weight:normal;">💡 ทริค: หากต้องการล็อคคู่ตั้งแต่แรก ให้พิมพ์ชื่อติดกันด้วยเครื่องหมายบวก เช่น <strong>เจ๋ง+จี</strong></span>
+                    </label>
+                    <textarea id="playerInput" rows="8" placeholder="เจ๋ง+จี&#10;นนท์นี่&#10;กาย&#10;ฟ้า+เบนซ์&#10;ป๊อบ&#10;อาร์ท"></textarea>
+                </div>
+        <div class="form-group">
+            <label>3. คะแนนชนะในแต่ละเกม (เริ่มต้น):</label>
+            <input type="number" id="winScore" value="21" min="1">
+        </div>
+        <div class="form-group" id="maxChampsGroup">
+            <label>4. เป็นแชมป์ติดต่อกันได้สูงสุด (ครั้ง):</label>
+            <input type="number" id="maxChamps" value="1" min="1">
+        </div>
+        <button onclick="startTournament()">เริ่มแข่งขัน</button>
+        <button class="btn-secondary" style="background: #cbd5e1; color: #334155;" onclick="clearSavedData()">ลบข้อมูลในระบบ (เริ่มใหม่ทั้งหมด)</button>
+        <button class="btn-secondary" style="background: #e2e8f0; color: #334155; margin-top: 10px;" onclick="showHistory()">📅 ดูประวัติการเล่นย้อนหลัง</button>
+    </div>
+
+    <div id="gameSection" class="game-section">
+        <div class="top-nav">
+            <div>
+                <div style="font-size: 18px; font-weight: bold;">กระดานแข่งขัน <span style="font-size:12px; color:#10b981;">(🟢 ออนไลน์)</span></div>
+                <div id="timeDisplay" style="font-size: 13px; color: #64748b; margin-top: 6px; display: none; background: var(--light); padding: 4px 10px; border-radius: 6px;"></div>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <button class="protected-btn" onclick="openMidGameSettings()" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; background: var(--warning); color: white; width: auto; font-size: 14px;">
+                    ⚙️ ตั้งค่าคอร์ท
+                </button>
+                <button id="adminLockBtn" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; outline: none; font-weight: bold; font-family: inherit; cursor: pointer; transition: 0.3s; color: white; width: auto; font-size: 14px;">
+                    🔒 โหมดผู้ชม
+                </button>
+                <button class="protected-btn" onclick="goToBilling()" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; outline: none; font-weight: bold; font-family: inherit; cursor: pointer; transition: 0.3s; color: white; background: var(--teal); width: auto; font-size: 14px;">
+                    💸 คิดเงิน
+                </button>
+                <button class="btn-export protected-btn" onclick="exportSummary()">📷 บันทึกสรุปผล</button>
+                <button class="btn-reset protected-btn" onclick="hardReset()">จบการแข่งขัน & ล้างข้อมูล</button>
+            </div>
+        </div>
+        
+        <p style="text-align: center; color: #94a3b8; font-size: 13px; margin-top: -10px;">แตะที่กรอบคะแนนเพื่อเพิ่มแต้ม (ข้อมูลจะอัปเดตทุกเครื่องอัตโนมัติ)</p>
+        
+        <div id="courtsContainer" class="courts-container"></div>
+
+        <div class="grid-layout" style="margin-top: 30px;">
+            <div class="info-panel" style="background: #e0f2fe;">
+                <h3>จัดการผู้เล่นระหว่างเกม</h3>
+                <div class="action-flex">
+                    <input type="text" id="newPlayerInput" class="protected-btn" placeholder="พิมพ์ชื่อผู้เล่นมาใหม่...">
+                    <button style="background: #0ea5e9;" class="protected-btn" onclick="addNewPlayer()">เพิ่มผู้เล่น</button>
+                </div>
+                <div class="action-flex" style="margin-bottom: 0;">
+                    <select id="removePlayerSelect" class="protected-btn"><option value="">-- เลือกผู้เล่นที่จะลบ --</option></select>
+                    <button style="background: #ef4444;" class="protected-btn" onclick="removePlayer()">ลบออก</button>
+                </div>
+            </div>
+
+            <div class="info-panel" style="background: #f3e8ff;">
+                <h3>ระบบล็อคคู่หู (Lock Pair)</h3>
+                <div class="action-flex">
+                    <select id="lockP1" class="protected-btn"><option value="">-- เลือกคนที่ 1 --</option></select>
+                    <select id="lockP2" class="protected-btn"><option value="">-- เลือกคนที่ 2 --</option></select>
+                    <button style="background: var(--purple);" class="protected-btn" onclick="lockPair()">ล็อคคู่</button>
+                </div>
+                <div id="lockedPairsList"></div>
+            </div>
+        </div>
+
+        <div class="grid-layout">
+            <div class="info-panel">
+                <h3>สถานะคิวปัจจุบัน</h3>
+                
+                <div style="background: #fff0f6; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #fbcfe8;">
+                    <strong style="color: #be185d; font-size: 14px;">🛌 เลือกผู้เล่นนั่งพักชั่วคราว</strong>
+                    <p style="font-size: 12px; color: #9d174d; margin: 5px 0 10px 0;">ระบบจะไม่ดึงรายชื่อคนที่พักอยู่ลงสนาม จนกว่าจะกดยกเลิก</p>
+                    <div class="action-flex" style="margin-bottom: 0;">
+                        <select id="manualBreakSelect" class="protected-btn">
+                            <option value="">-- เลือกผู้เล่น --</option>
+                        </select>
+                        <button style="background: #e11d48;" class="protected-btn" onclick="toggleBreakFromSelect()">สลับสถานะ (พัก/เลิกพัก)</button>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 12px;"><strong>รอลงสนาม:</strong> <div id="queueList" style="margin-top: 5px;"></div></div>
+                <div style="margin-bottom: 15px;"><strong>นั่งพัก:</strong> <div id="eliminatedList" style="margin-top: 5px;"></div></div>
+                
+                <div style="margin-top: 20px; border-top: 1px solid #cbd5e1; padding-top: 20px;">
+                    <button class="protected-btn" onclick="generateNextPreview()" style="background: #10b981; font-size: 15px; margin-bottom: 10px; padding: 10px;">🎲 สุ่มดูคู่ถัดไปล่วงหน้า (Preview)</button>
+                    <div id="nextUpPreviewBox"></div>
+                </div>
+                
+                <h3 style="margin-top: 25px; text-align: left;">สถิติผู้เล่น</h3>
+                <table id="playerStatTable">
+                    <thead><tr><th>ชื่อ</th><th>เวลามาถึง</th><th>ลงเล่น</th><th>ชนะ</th><th>แพ้</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <div class="info-panel">
+                <h3>ประวัติการแข่งขัน</h3>
+                <div id="historyContainer" style="display: flex; gap: 15px; flex-wrap: wrap;"></div>
+            </div>
+        </div>
+
+        <div class="info-panel" style="margin-top: 20px;">
+            <h3 style="color: var(--teal); text-align: left;">ตารางตรวจสอบประวัติการจับคู่กัน (Partner Matrix)</h3>
+            <div id="matrixTableContainer" style="overflow-x: auto;"></div>
+        </div>
+    </div>
+</div>
+
+<div id="exportCard">
+    <div class="export-header">🏸 สรุปผลแบดมินตันประจำวัน</div>
+    <div class="mvp-box">
+        <div class="mvp-title">👑 Most Valuable Player (ชนะมากที่สุด)</div>
+        <div id="exportMVP" class="mvp-name">-</div>
+        <div id="exportMVPStat" style="color: #92400e; font-size: 14px;">-</div>
+    </div>
+    <table class="export-table" id="exportStatTable">
+        <thead>
+            <tr>
+                <th style="width:40%;">ผู้เล่น</th>
+                <th style="text-align:center;">แมตช์</th>
+                <th style="text-align:center; color:#10b981;">ชนะ</th>
+                <th style="text-align:center; color:#ef4444;">แพ้</th>
+                <th style="text-align:right;">Win Rate</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+<div id="historyModal" class="modal-overlay">
+    <div class="modal-box">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h2 style="margin:0; color:var(--dark);">📅 ประวัติย้อนหลัง</h2>
+            <button onclick="closeHistory()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#94a3b8; width:auto; padding:0; margin:0;">✖</button>
+        </div>
+        <div id="historyListContainer"></div>
+    </div>
+</div>
+
+<div id="historyDetailModal" class="modal-overlay" style="z-index: 1100;">
+    <div class="modal-box" style="max-width: 550px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom: 2px solid var(--light); padding-bottom: 10px;">
+            <h3 id="detailModalTitle" style="margin:0; color:var(--primary); font-size: 18px;">📋 รายละเอียดการเล่น</h3>
+            <button onclick="closeHistoryDetail()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#94a3b8; width:auto; padding:0; margin:0;">✖</button>
+        </div>
+        <div id="historyDetailContent"></div>
+    </div>
+</div>
+
+<div id="midGameSettingsModal" class="modal-overlay" style="z-index: 1200;">
+    <div class="modal-box" style="max-width: 400px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom: 2px solid var(--light); padding-bottom: 10px;">
+            <h3 style="margin:0; color:var(--dark); font-size: 18px;">⚙️ จัดการคอร์ท & ตั้งค่าอิสระ</h3>
+        </div>
+        <div id="midGameDynamicConfig">
+            </div>
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+            <button class="btn-secondary" onclick="closeMidGameSettings()" style="background: #cbd5e1; color: #334155; width: auto; margin: 0; padding: 10px 20px;">ยกเลิก</button>
+            <button class="btn-success" onclick="saveMidGameSettings()" style="width: auto; margin: 0; padding: 10px 20px;">💾 บันทึกและปรับใช้</button>
+        </div>
+    </div>
+</div>
+
+    <script src="js/part1.js"></script>
+    <script src="js/part2.js"></script>
+    <script src="js/part3.js"></script>
+    <script src="js/part4.js"></script>
+    <script src="js/part5.js"></script>
+    <script src="js/part6.js"></script>
+
+    <script type="module" src="js/firebase.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,153 @@
+    function hardReset() {
+        if(confirm('คุณต้องการจบการแข่งขันประจำวันนี้ และล้างข้อมูลทั้งหมดใช่หรือไม่?\n(ข้อมูลรอบนี้จะถูกบันทึกในประวัติย้อนหลังอัตโนมัติ)')) { 
+            archiveCurrentSession();
+            // [แก้ไข] ล้าง localStorage ด้วยเสมอ ไม่ใช่แค่ Firebase
+            localStorage.removeItem('badminton_game_state');
+            if(window.clearCloudData) {
+                window.clearCloudData();
+            } else {
+                window.location.href = 'index.html';
+            }
+        }
+    }
+
+    function showHistory() {
+        renderHistoryList();
+        document.getElementById('historyModal').style.display = 'flex';
+    }
+
+    function closeHistory() { document.getElementById('historyModal').style.display = 'none'; }
+
+    function renderHistoryList() {
+        let historyStr = localStorage.getItem('badminton_past_sessions');
+        let historyList = historyStr ? JSON.parse(historyStr) : [];
+        let container = document.getElementById('historyListContainer');
+        if (historyList.length === 0) {
+            container.innerHTML = `<div style="text-align:center; padding:30px; color:#94a3b8; background:#f8fafc; border-radius:12px;">ยังไม่มีประวัติการเล่นย้อนหลัง</div>`;
+            return;
+        }
+        // [แก้ไข] ใช้ escapeHTML() ป้องกัน XSS ก่อนนำข้อมูลใส่ใน innerHTML
+        container.innerHTML = historyList.map(item => `
+            <div class="history-card" onclick="viewHistoryDetail(${item.id})">
+                <div class="history-info"><h4>รอบวันที่ ${escapeHTML(item.date)}</h4><p>👥 ผู้เล่นทั้งหมด: ${escapeHTML(item.playerCount)} คน | 🏸 ทั้งหมด: ${escapeHTML(item.matchCount)} แมตช์</p></div>
+                <div onclick="event.stopPropagation();"><button class="btn-delete-hist" onclick="deleteHistory(${item.id})">🗑️ ลบ</button></div>
+            </div>`).join('');
+    }
+
+    function deleteHistory(id) {
+        if(!confirm('คุณแน่ใจหรือไม่ว่าต้องการลบประวัติการเล่นรอบนี้?')) return;
+        let historyStr = localStorage.getItem('badminton_past_sessions');
+        if(!historyStr) return;
+        let historyList = JSON.parse(historyStr).filter(item => Number(item.id) !== Number(id));
+        localStorage.setItem('badminton_past_sessions', JSON.stringify(historyList));
+        renderHistoryList(); 
+    }
+
+    window.viewHistoryDetail = function(id) {
+        let historyStr = localStorage.getItem('badminton_past_sessions');
+        if(!historyStr) return;
+        let selectedItem = JSON.parse(historyStr).find(item => Number(item.id) === Number(id));
+        if(!selectedItem || !selectedItem.snapshot) return alert('ไม่พบข้อมูลรายละเอียดของรอบนี้');
+
+        let oldState = JSON.parse(selectedItem.snapshot);
+        document.getElementById('detailModalTitle').innerText = `📋 รายละเอียดรอบวันที่ ${selectedItem.date}`;
+        
+        let pListHtml = (oldState.players || []).map(p => {
+            let pStat = oldState.playerStats ? oldState.playerStats[p] : null;
+            // [แก้ไข] ใช้ escapeHTML() ป้องกัน XSS สำหรับชื่อผู้เล่นและสถิติ
+            return `<span class="tag" style="background:#e0f2fe; color:#0369a1; padding:6px 12px; margin:4px;">${escapeHTML(p)} (${escapeHTML(pStat ? pStat.arrivalTime : '-')}น. | ตี ${escapeHTML(pStat ? pStat.played : 0)} ชนะ ${escapeHTML(pStat ? pStat.wins : 0)})</span>`;
+        }).join('') || 'ไม่มีรายชื่อผู้เล่น';
+
+        // [แก้ไข] ใช้ escapeHTML() ป้องกัน XSS สำหรับชื่อคอร์ทและผลการแข่งขัน
+        let matchLinesHtml = (oldState.matchHistory || []).map(m => `<div style="padding:8px 0; border-bottom:1px dashed #cbd5e1; font-size:13.5px; color:#334155;"><strong>[${escapeHTML(m.courtName || 'Court')}]</strong> รอบที่ ${escapeHTML(m.round)}: ${escapeHTML(m.result)}</div>`).join('') || '<div style="color:#94a3b8; padding:10px 0;">ไม่มีประวัติการบันทึกแมตช์การแข่งขัน</div>';
+
+        document.getElementById('historyDetailContent').innerHTML = `
+            <div class="detail-section"><h5>👥 รายชื่อผู้เล่น & สถิติภาพรวม</h5><div style="display:flex; flex-wrap:wrap; margin-top:5px;">${pListHtml}</div></div>
+            <div class="detail-section" style="margin-top:20px;"><h5>🏸 ผลการแข่งขันแต่ละแมตช์</h5><div style="max-height:280px; overflow-y:auto; background:#ffffff; padding:12px; border-radius:8px; margin-top:5px; border:1px solid #e2e8f0;">${matchLinesHtml}</div></div>
+            <div style="margin-top:20px; text-align:center; font-size:12px; color:#94a3b8;">* ข้อมูลนี้ถูกดึงมาจากระบบบันทึกความจำ LocalStorage ของเครื่องคุณ</div>`;
+        document.getElementById('historyDetailModal').style.display = 'flex';
+    }
+
+    window.closeHistoryDetail = function() { document.getElementById('historyDetailModal').style.display = 'none'; }
+
+    // [แก้ไข] เก็บเป็น SHA-256 hash แทนรหัสดิบ (hash ของ "1234")
+    // หากต้องการเปลี่ยน PIN ให้รัน: crypto.subtle.digest('SHA-256', new TextEncoder().encode('รหัสใหม่')) ใน Console
+    const ADMIN_PIN_HASH = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4";
+    // [แก้ไข] ใช้ sessionStorage แทน localStorage เพื่อให้ reset ทุกครั้งที่ปิด tab
+    let isAdminUnlocked = sessionStorage.getItem("adminUnlocked") === "true";
+
+    function updateLockStatus() {
+        const protectedElements = document.querySelectorAll('.protected-btn');
+        const lockBtn = document.getElementById('adminLockBtn');
+        if (!lockBtn) return;
+        if (isAdminUnlocked) {
+            lockBtn.innerHTML = "🔓 โหมดกรรมการ";
+            lockBtn.style.backgroundColor = "#10b981"; 
+            protectedElements.forEach(el => {
+                if(el.tagName === 'BUTTON' || el.tagName === 'INPUT' || el.tagName === 'SELECT') el.disabled = false;
+                el.style.pointerEvents = "auto"; el.style.opacity = "1";
+                el.style.cursor = (el.tagName === 'INPUT' || el.tagName === 'SELECT') ? "auto" : "pointer";
+            });
+        } else {
+            lockBtn.innerHTML = "🔒 โหมดผู้ชม";
+            lockBtn.style.backgroundColor = "#94a3b8"; 
+            protectedElements.forEach(el => {
+                if(el.tagName === 'BUTTON' || el.tagName === 'INPUT' || el.tagName === 'SELECT') el.disabled = true;
+                el.style.pointerEvents = "none"; el.style.opacity = "0.5"; el.style.cursor = "not-allowed";
+            });
+        }
+    }
+
+    // [แก้ไข] ใช้ async เพื่อรอ hash และเปรียบเทียบแบบ hash ไม่ใช่ plaintext
+    document.getElementById('adminLockBtn').addEventListener('click', async () => {
+        if (isAdminUnlocked) {
+            isAdminUnlocked = false; sessionStorage.setItem("adminUnlocked", "false"); updateLockStatus();
+        } else {
+            const userInput = prompt("กรุณาใส่รหัสผ่าน PIN เพื่อเปิดโหมดกรรมการ:");
+            if (userInput !== null) {
+                const inputHash = await hashPIN(userInput);
+                if (inputHash === ADMIN_PIN_HASH) {
+                    isAdminUnlocked = true; sessionStorage.setItem("adminUnlocked", "true"); updateLockStatus();
+                } else {
+                    alert("❌ รหัสผ่านไม่ถูกต้อง");
+                }
+            }
+        }
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+            // แสดง banner และซ่อน input maxChamps ถ้าเปิดด้วย ?mode=single
+            if (_isSingleMode) {
+                document.getElementById('singleModeBanner').style.display = 'block';
+                let maxChampsGroup = document.getElementById('maxChampsGroup');
+                if (maxChampsGroup) maxChampsGroup.style.display = 'none';
+            }
+
+            // [แก้ไข] โหลด state จาก localStorage ก่อนเลย ไม่ต้องรอ Firebase
+            // ป้องกันหน้าเด้งกลับ setup เมื่อรีโหลดและ Firebase โหลดช้า/ล้มเหลว
+            let savedState = localStorage.getItem('badminton_game_state');
+            if (savedState) {
+                try {
+                    restoreSnapshot(JSON.parse(savedState));
+                    if (players.length > 0) {
+                        document.getElementById('setupSection').classList.remove('active');
+                        document.getElementById('gameSection').classList.add('active');
+                        renderAll();
+                    }
+                } catch(e) {
+                    console.error('Failed to restore local state:', e);
+                    localStorage.removeItem('badminton_game_state');
+                }
+            }
+
+            let savedPlayers = sessionStorage.getItem('setup_players');
+            if (savedPlayers) {
+                document.getElementById('playerInput').value = savedPlayers;
+                document.getElementById('numCourtsSetting').value = sessionStorage.getItem('setup_courts') || "1";
+                document.getElementById('winScore').value = sessionStorage.getItem('setup_winScore') || "21";
+                document.getElementById('maxChamps').value = "1";
+                sessionStorage.removeItem('setup_players'); 
+                startTournament(); 
+            }
+            updateLockStatus();
+        });
