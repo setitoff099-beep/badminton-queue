@@ -68,6 +68,8 @@
         
         .tag { display: inline-block; background: #cbd5e1; color: #334155; padding: 4px 10px; border-radius: 12px; margin: 2px; font-size: 12px; font-weight: bold; user-select: none; }
         .tag-break { background: #ffe4e6 !important; color: #e11d48 !important; border: 1px solid #fecdd3; }
+        .tag-wait { background: #dcfce7 !important; color: #166534 !important; border: 1px solid #22c55e; }
+        .tag-rest { background: #fee2e2 !important; color: #b91c1c !important; border: 1px solid #ef4444; }
         
         .matrix-table th { background-color: var(--teal); color: white; font-weight: bold; }
         .matrix-self { background-color: #e2e8f0; color: #94a3b8; }
@@ -2197,21 +2199,23 @@ function generateAllValidTeams(excludeList) {
         });
         document.getElementById('courtsContainer').innerHTML = courtsHtml;
 
-        let queueHtml = mainQueue.map(p => {
+        // แยกกลุ่มตามสถานะจริง (แสดงผลเท่านั้น ไม่กระทบลอจิกจัดคิว)
+        //  - เขียว "รอลงสนาม": พักครบแล้ว พร้อมถูกเลือกในแมตช์ถัดไป
+        //  - แดง "นั่งพัก": เพิ่งเล่นจบ (ยังไม่ถึงรอบ) หรือกดพักชั่วคราว
+        let allWaiting = [...mainQueue, ...eliminatedOrder.filter(p => !mainQueue.includes(p))];
+        let readyList = [], restList = [];
+        allWaiting.forEach(p => {
+            let st = playerStats[p];
+            let isBreak = st && st.onBreak;
+            let justPlayed = st && (st.lastBenchTime || 0) > globalMatchCounter;
+            if (isBreak || justPlayed) restList.push(p); else readyList.push(p);
+        });
+        const makeTag = (p, cls) => {
             let isBreak = playerStats[p] && playerStats[p].onBreak;
-            let breakClass = isBreak ? 'tag-break' : '';
-            let statusSign = isBreak ? ' 🛌' : '';
-            return `<span class="tag ${breakClass}">${getDisplayName(p)}${statusSign}</span>`;
-        }).join(' ') || "-";
-        document.getElementById('queueList').innerHTML = queueHtml;
-
-        let elimHtml = eliminatedOrder.map(p => {
-            let isBreak = playerStats[p] && playerStats[p].onBreak;
-            let breakClass = isBreak ? 'tag-break' : '';
-            let statusSign = isBreak ? ' 🛌' : '';
-            return `<span class="tag ${breakClass}">${getDisplayName(p)}${statusSign}</span>`;
-        }).join(' ') || "-";
-        document.getElementById('eliminatedList').innerHTML = elimHtml;
+            return `<span class="tag ${isBreak ? 'tag-break' : cls}">${getDisplayName(p)}${isBreak ? ' 🛌' : ''}</span>`;
+        };
+        document.getElementById('queueList').innerHTML = readyList.map(p => makeTag(p, 'tag-wait')).join(' ') || "-";
+        document.getElementById('eliminatedList').innerHTML = restList.map(p => makeTag(p, 'tag-rest')).join(' ') || "-";
         
         let breakSelectHtml = '<option value="">-- เลือกผู้เล่น --</option>';
         players.forEach(p => {
