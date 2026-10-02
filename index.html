@@ -385,6 +385,28 @@
         if (previewBox) previewBox.innerHTML = '';
     }
 
+    // [แก้ไข] ดึงผลที่ "สุ่มดูล่วงหน้า" ไว้มาใช้จริง (เดิม cachedNextMatch ถูกเขียนอย่างเดียวแต่ไม่เคยถูกอ่าน
+    // ทำให้ตอนสุ่มจริงเป็นการสุ่มใหม่ทั้งหมด จึงไม่ตรงกับ preview)
+    // kind = 'challenger' (ผู้ท้าชิงแชมป์) | 'full' (ล้างสนามจัดใหม่ทั้ง 2 ทีม)
+    // คืนค่า null ถ้าไม่มี preview / ไม่ใช่ประเภทคู่ / มีผู้เล่นคนใดในผลที่เก็บไว้ไม่ว่างแล้ว (พัก/ลงสนามไปแล้ว)
+    function consumePreview(kind, req) {
+        let c = cachedNextMatch;
+        if (!c || req !== 2) return null;
+        let members, result;
+        if (kind === 'challenger') {
+            if (!c.challengers || c.challengers.length < 2) return null;
+            members = c.challengers;
+            result = [...c.challengers];
+        } else {
+            if (!c.fullMatch) return null;
+            members = [...c.fullMatch.teamA, ...c.fullMatch.teamB];
+            result = { teamA: [...c.fullMatch.teamA], teamB: [...c.fullMatch.teamB] };
+        }
+        let avail = getAvailablePlayers([]);
+        if (!members.every(m => avail.includes(m))) return null;
+        return result;
+    }
+
     // ฟังก์ชันกลางสำหรับแสดง popup แจ้งเตือน (ใช้แทนโค้ดซ้ำหลายจุด)
     function showNotification(html, color = '#f59e0b') {
         let popup = document.createElement('div');
@@ -1762,13 +1784,20 @@ function generateAllValidTeams(excludeList) {
             if (data.isChampOut) {
                 court.currentChamp = null;
 
-                let teamA, teamB;
+                let teamA, teamB, preOptimized = null;
                 // [แก้ไข Bug] ล้าง cache เสมอก่อนเลือกผู้เล่น
                 // เพราะ cache ถูกสร้างตอนแมตช์ยังไม่จบ ณ เวลานั้น lastBenchTime ของคนแพ้ยังไม่ถูก set
                 // หากใช้ cache ตรงๆ จะข้ามการกรอง restedPool ทำให้คนแพ้รอบล่าสุดถูกดึงลงสนามซ้ำได้
+                let pvFull = consumePreview('full', req);
                 clearPreviewCache();
-                teamA = selectTeam([], req);
-                teamB = selectTeam([...teamA], req);
+                if (pvFull) {
+                    // ใช้ผลที่พรีวิวไว้ตรงๆ (ทีมที่ optimize แล้ว) เพื่อให้ตรงกับที่แสดง
+                    teamA = pvFull.teamA; teamB = pvFull.teamB;
+                    preOptimized = pvFull;
+                } else {
+                    teamA = selectTeam([], req);
+                    teamB = selectTeam([...teamA], req);
+                }
 
                 // [แก้ไข] ป้องกันกรณีคนคี่/คนไม่พอ
                 if (!teamA || !teamA[0] || !teamB || !teamB[0]) {
@@ -1784,7 +1813,7 @@ function generateAllValidTeams(excludeList) {
                     court.teamA = { p1: teamA[0] };
                     court.teamB = { p1: teamB[0] };
                 } else {
-                    let optimized = optimizeFourPlayers([...teamA, ...teamB]);
+                    let optimized = preOptimized || optimizeFourPlayers([...teamA, ...teamB]);
                     court.teamA = { p1: optimized.teamA[0], p2: optimized.teamA[1] };
                     court.teamB = { p1: optimized.teamB[0], p2: optimized.teamB[1] };
                 }
@@ -1795,8 +1824,9 @@ function generateAllValidTeams(excludeList) {
                 let challengers;
                 // [แก้ไข Bug] ล้าง cache เสมอ เพราะ cache ถูกสร้างก่อน finishMatch set lastBenchTime
                 // ทำให้คนแพ้รอบล่าสุดอาจถูกดึงมาเป็นผู้ท้าชิงได้ทันที
+                let pvChallengers = consumePreview('challenger', req);
                 clearPreviewCache();
-                challengers = selectTeam(excludeList, req, [champTeam.p1, champTeam.p2].filter(Boolean));
+                challengers = pvChallengers || selectTeam(excludeList, req, [champTeam.p1, champTeam.p2].filter(Boolean));
 
                 // [แก้ไข] ป้องกันกรณีคนคี่/คนไม่พอสำหรับผู้ท้าชิง
                 if (!challengers || challengers.length < req || !challengers[0]) {
@@ -1947,21 +1977,25 @@ function generateAllValidTeams(excludeList) {
                 return;
             }
 
-            let teamChallenger = selectTeam([]);
+            // [แก้ไข] เลือกคู่หน้าสุดเพียง "ครั้งเดียว" แล้วใช้ร่วมกันทั้งสองกรณี
+            // เดิมเรียก selectTeam([]) แยกกัน 2 ครั้ง (ผู้ท้าชิง / ล้างสนาม) ซึ่งสุ่มคนละผล จึงขัดกันเองในหน้าจอ
+            let tA = selectTeam([]);
+            let teamChallenger = [...tA];
             let display1 = `<span style="color:#3b82f6;">${getDisplayName(teamChallenger[0])} & ${getDisplayName(teamChallenger[1])}</span>`;
             let display2 = `<span style="color:#94a3b8; font-size:13px; font-weight:normal;">(ยังคำนวณไม่ได้: ต้องมีคนรอคิว 4 คนขึ้นไป)</span>`;
             
             let fullMatchObj = null;
 
             if (pool.length >= 4) {
-                let tA = selectTeam([]);
                 let tB = selectTeam([tA[0], tA[1]]);
-                let optimized = optimizeFourPlayers([tA[0], tA[1], tB[0], tB[1]]);
-                fullMatchObj = optimized;
-                display2 = `<span style="color:#3b82f6;">${getDisplayName(optimized.teamA[0])} & ${getDisplayName(optimized.teamA[1])}</span> <span style="color: #94a3b8; font-weight: normal; margin: 0 10px;">VS</span> <span style="color:#ef4444;">${getDisplayName(optimized.teamB[0])} & ${getDisplayName(optimized.teamB[1])}</span>`;
+                if (tB && tB.length >= 2 && tB[0] && tB[1]) {
+                    let optimized = optimizeFourPlayers([tA[0], tA[1], tB[0], tB[1]]);
+                    fullMatchObj = { teamA: [...optimized.teamA], teamB: [...optimized.teamB] };
+                    display2 = `<span style="color:#3b82f6;">${getDisplayName(optimized.teamA[0])} & ${getDisplayName(optimized.teamA[1])}</span> <span style="color: #94a3b8; font-weight: normal; margin: 0 10px;">VS</span> <span style="color:#ef4444;">${getDisplayName(optimized.teamB[0])} & ${getDisplayName(optimized.teamB[1])}</span>`;
+                }
             }
             
-            // บันทึกค่าลงความจำ
+            // บันทึกผลลงความจำ — prepareNextMatch จะดึงผลนี้ไปใช้จริง (ผ่าน consumePreview)
             cachedNextMatch = {
                 challengers: teamChallenger,
                 fullMatch: fullMatchObj
@@ -1972,10 +2006,11 @@ function generateAllValidTeams(excludeList) {
                     <strong style="display:block; margin-bottom:6px;">🏸 กรณีหาผู้ท้าชิงแชมป์:</strong>
                     <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #dcfce3;">${display1}</div>
                 </div>
-                <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; color: #334155; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; color: #334155; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
                     <strong style="display:block; margin-bottom:6px;">⚔️ กรณีล้างสนามจัดใหม่ (ประเภทคู่):</strong>
                     <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #f1f5f9;">${display2}</div>
-                </div>`;
+                </div>
+                <div style="font-size: 12px; color: #64748b; text-align: center;">🔒 ผลนี้จะถูกใช้จริงในคอร์ทที่จบแมตช์ก่อน (ถ้ามีการพักผู้เล่น/เพิ่ม-ลบคน/ล็อคคู่ ระบบจะล้างพรีวิวให้)</div>`;
         }
 
     function lockPair() {
