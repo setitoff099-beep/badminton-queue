@@ -385,26 +385,84 @@
         if (previewBox) previewBox.innerHTML = '';
     }
 
-    // [แก้ไข] ดึงผลที่ "สุ่มดูล่วงหน้า" ไว้มาใช้จริง (เดิม cachedNextMatch ถูกเขียนอย่างเดียวแต่ไม่เคยถูกอ่าน
-    // ทำให้ตอนสุ่มจริงเป็นการสุ่มใหม่ทั้งหมด จึงไม่ตรงกับ preview)
+    // [รองรับหลายคอร์ท] cachedNextMatch = { expected, slots: [ { challengers:[a,b], fullMatch:{teamA,teamB}|null }, ... ] }
+    // slots[0] = คู่ที่จะลงให้ "คอร์ทที่จบก่อน", slots[1] = คอร์ทที่จบลำดับสอง ... (เลือกต่อกันแบบไม่ซ้ำคน)
+    function slotChallengersValid(slot, avail) {
+        return !!slot && slot.challengers && slot.challengers.length >= 2 && slot.challengers.every(m => avail.includes(m));
+    }
+    function slotFullValid(slot, avail) {
+        return !!slot && !!slot.fullMatch && [...slot.fullMatch.teamA, ...slot.fullMatch.teamB].every(m => avail.includes(m));
+    }
+
+    // ดึงผลที่ "สุ่มดูล่วงหน้า" มาใช้จริง (ใช้ slot แรกที่กำลังแสดงอยู่เท่านั้น แล้วเอาออกจากรายการ)
     // kind = 'challenger' (ผู้ท้าชิงแชมป์) | 'full' (ล้างสนามจัดใหม่ทั้ง 2 ทีม)
-    // คืนค่า null ถ้าไม่มี preview / ไม่ใช่ประเภทคู่ / มีผู้เล่นคนใดในผลที่เก็บไว้ไม่ว่างแล้ว (พัก/ลงสนามไปแล้ว)
+    // คืน null ถ้าไม่มี preview / ไม่ใช่ประเภทคู่ / ผู้เล่นในผลที่เก็บไว้ไม่ว่างแล้ว
     function consumePreview(kind, req) {
         let c = cachedNextMatch;
-        if (!c || req !== 2) return null;
-        let members, result;
-        if (kind === 'challenger') {
-            if (!c.challengers || c.challengers.length < 2) return null;
-            members = c.challengers;
-            result = [...c.challengers];
-        } else {
-            if (!c.fullMatch) return null;
-            members = [...c.fullMatch.teamA, ...c.fullMatch.teamB];
-            result = { teamA: [...c.fullMatch.teamA], teamB: [...c.fullMatch.teamB] };
-        }
+        if (!c || !c.slots || c.slots.length === 0 || req !== 2) return null;
         let avail = getAvailablePlayers([]);
-        if (!members.every(m => avail.includes(m))) return null;
+        let slot = c.slots[0];
+        let result = null;
+        if (kind === 'challenger') {
+            if (slotChallengersValid(slot, avail)) result = [...slot.challengers];
+        } else {
+            if (slotFullValid(slot, avail)) result = { teamA: [...slot.fullMatch.teamA], teamB: [...slot.fullMatch.teamB] };
+        }
+        if (result) {
+            c.slots.shift();
+            c.expected = Math.max(0, (c.expected || 1) - 1);
+        }
         return result;
+    }
+
+    // วาดกล่อง preview จาก cachedNextMatch (ซ่อน slot ที่ผู้เล่นไม่ว่างแล้ว)
+    function renderPreviewBox() {
+        let box = document.getElementById('nextUpPreviewBox');
+        if (!box) return;
+        let c = cachedNextMatch;
+        if (!c || !c.slots) { box.innerHTML = ''; return; }
+        let avail = getAvailablePlayers([]);
+        let shown = [];
+        for (let slot of c.slots) {
+            if (!slotChallengersValid(slot, avail)) break; // ลำดับถัดๆ ไปขึ้นกับลำดับนี้ ถ้าเสียแล้วหยุดแสดง
+            shown.push({ challengers: slot.challengers, fullMatch: slotFullValid(slot, avail) ? slot.fullMatch : null });
+        }
+        if (shown.length === 0) { cachedNextMatch = null; box.innerHTML = ''; return; }
+
+        const nm = (p) => getDisplayName(p);
+        let multi = (c.expected || shown.length) > 1;
+        let html = '';
+        shown.forEach((slot, i) => {
+            let d1 = `<span style="color:#3b82f6;">${nm(slot.challengers[0])} & ${nm(slot.challengers[1])}</span>`;
+            let d2 = `<span style="color:#94a3b8; font-size:13px; font-weight:normal;">(ยังคำนวณไม่ได้: คนรอคิวไม่พอ)</span>`;
+            if (slot.fullMatch) {
+                let f = slot.fullMatch;
+                d2 = `<span style="color:#3b82f6;">${nm(f.teamA[0])} & ${nm(f.teamA[1])}</span> <span style="color: #94a3b8; font-weight: normal; margin: 0 10px;">VS</span> <span style="color:#ef4444;">${nm(f.teamB[0])} & ${nm(f.teamB[1])}</span>`;
+            }
+            html += `<div style="margin-bottom: 10px;">`;
+            if (multi) html += `<div style="font-weight:bold; font-size:13px; color:#475569; margin: 4px 0 6px;">🏟️ คอร์ทที่จบลำดับที่ ${i + 1}</div>`;
+            html += `
+                <div style="background: #f0fdf4; padding: 12px; border-radius: 8px; border: 1px solid #bbf7d0; font-size: 13px; color: #166534; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                    <strong style="display:block; margin-bottom:6px;">🏸 กรณีหาผู้ท้าชิงแชมป์:</strong>
+                    <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #dcfce3;">${d1}</div>
+                </div>
+                <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; color: #334155; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                    <strong style="display:block; margin-bottom:6px;">⚔️ กรณีล้างสนามจัดใหม่ (ประเภทคู่):</strong>
+                    <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #f1f5f9;">${d2}</div>
+                </div>
+            </div>`;
+        });
+        if (shown.length < (c.expected || 0)) {
+            html += `<div style="background:#fffbeb; padding:10px 12px; border-radius:8px; border:1px solid #fde68a; font-size:12px; color:#92400e; margin-bottom:8px;">⏳ คอร์ทที่จบลำดับถัดไป: ยังคำนวณไม่ได้ เพราะคนรอคิวไม่พอ ต้องรอผู้เล่นที่เพิ่งจบแมตช์ก่อนหน้ากลับเข้าคิว (กดพรีวิวใหม่ภายหลังได้)</div>`;
+        }
+        html += `<div style="font-size: 12px; color: #64748b; text-align: center;">🔒 ผลนี้จะถูกใช้จริงตามลำดับที่คอร์ทจบแมตช์ (ถ้ามีการพักผู้เล่น/เพิ่ม-ลบคน/ล็อคคู่ ระบบจะล้างพรีวิวให้)</div>`;
+        box.innerHTML = html;
+    }
+
+    // เรียกหลังนำ preview ไปใช้จริง: ถ้ายังเหลือลำดับถัดไปที่ใช้ได้ให้แสดงต่อ ไม่งั้นล้าง
+    function refreshPreviewAfterUse() {
+        if (!cachedNextMatch || !cachedNextMatch.slots || cachedNextMatch.slots.length === 0) { clearPreviewCache(); return; }
+        renderPreviewBox();
     }
 
     // ฟังก์ชันกลางสำหรับแสดง popup แจ้งเตือน (ใช้แทนโค้ดซ้ำหลายจุด)
@@ -1781,6 +1839,7 @@ function generateAllValidTeams(excludeList) {
             court.isGameOver = false; court.scoreA = 0; court.scoreB = 0; court.matchRound++;
             //court.stateBeforeFinishStr = null; // ปิดไว้เพื่อให้ย้อนผลได้
 
+            let usedPreview = false;
             if (data.isChampOut) {
                 court.currentChamp = null;
 
@@ -1789,7 +1848,7 @@ function generateAllValidTeams(excludeList) {
                 // เพราะ cache ถูกสร้างตอนแมตช์ยังไม่จบ ณ เวลานั้น lastBenchTime ของคนแพ้ยังไม่ถูก set
                 // หากใช้ cache ตรงๆ จะข้ามการกรอง restedPool ทำให้คนแพ้รอบล่าสุดถูกดึงลงสนามซ้ำได้
                 let pvFull = consumePreview('full', req);
-                clearPreviewCache();
+                if (pvFull) usedPreview = true; else clearPreviewCache();
                 if (pvFull) {
                     // ใช้ผลที่พรีวิวไว้ตรงๆ (ทีมที่ optimize แล้ว) เพื่อให้ตรงกับที่แสดง
                     teamA = pvFull.teamA; teamB = pvFull.teamB;
@@ -1825,7 +1884,7 @@ function generateAllValidTeams(excludeList) {
                 // [แก้ไข Bug] ล้าง cache เสมอ เพราะ cache ถูกสร้างก่อน finishMatch set lastBenchTime
                 // ทำให้คนแพ้รอบล่าสุดอาจถูกดึงมาเป็นผู้ท้าชิงได้ทันที
                 let pvChallengers = consumePreview('challenger', req);
-                clearPreviewCache();
+                if (pvChallengers) usedPreview = true; else clearPreviewCache();
                 challengers = pvChallengers || selectTeam(excludeList, req, [champTeam.p1, champTeam.p2].filter(Boolean));
 
                 // [แก้ไข] ป้องกันกรณีคนคี่/คนไม่พอสำหรับผู้ท้าชิง
@@ -1858,8 +1917,8 @@ function generateAllValidTeams(excludeList) {
                 recordPartnerships(court.teamA, court.teamB);
             }
             
-            // ล้างความจำหลังใช้งานเสร็จทันที
-            clearPreviewCache(); 
+            // ถ้าใช้ preview ไปแล้ว คงลำดับที่เหลือไว้ (สำหรับคอร์ทอื่นที่ยังไม่จบ) ไม่งั้นล้างทิ้ง
+            if (usedPreview) refreshPreviewAfterUse(); else clearPreviewCache();
             
             renderAll();
             saveData();
@@ -1977,40 +2036,33 @@ function generateAllValidTeams(excludeList) {
                 return;
             }
 
-            // [แก้ไข] เลือกคู่หน้าสุดเพียง "ครั้งเดียว" แล้วใช้ร่วมกันทั้งสองกรณี
-            // เดิมเรียก selectTeam([]) แยกกัน 2 ครั้ง (ผู้ท้าชิง / ล้างสนาม) ซึ่งสุ่มคนละผล จึงขัดกันเองในหน้าจอ
-            let tA = selectTeam([]);
-            let teamChallenger = [...tA];
-            let display1 = `<span style="color:#3b82f6;">${getDisplayName(teamChallenger[0])} & ${getDisplayName(teamChallenger[1])}</span>`;
-            let display2 = `<span style="color:#94a3b8; font-size:13px; font-weight:normal;">(ยังคำนวณไม่ได้: ต้องมีคนรอคิว 4 คนขึ้นไป)</span>`;
-            
-            let fullMatchObj = null;
+            // [รองรับหลายคอร์ท] จำนวนลำดับที่ต้องพรีวิว = จำนวนคอร์ทประเภทคู่ที่เปิดอยู่ (อย่างน้อย 1)
+            let expected = Math.max(1, courts.filter(c => !c.isPaused && (c.matchType || 'doubles') !== 'singles').length);
 
-            if (pool.length >= 4) {
-                let tB = selectTeam([tA[0], tA[1]]);
-                if (tB && tB.length >= 2 && tB[0] && tB[1]) {
-                    let optimized = optimizeFourPlayers([tA[0], tA[1], tB[0], tB[1]]);
-                    fullMatchObj = { teamA: [...optimized.teamA], teamB: [...optimized.teamB] };
-                    display2 = `<span style="color:#3b82f6;">${getDisplayName(optimized.teamA[0])} & ${getDisplayName(optimized.teamA[1])}</span> <span style="color: #94a3b8; font-weight: normal; margin: 0 10px;">VS</span> <span style="color:#ef4444;">${getDisplayName(optimized.teamB[0])} & ${getDisplayName(optimized.teamB[1])}</span>`;
+            // เลือกคู่ทีละลำดับ โดยตัดคนที่ถูกเลือกไปแล้วออก (ไม่ซ้ำคนระหว่างลำดับ)
+            // ในแต่ละลำดับเลือกคู่หน้า "ครั้งเดียว" ใช้ร่วมกันทั้งกรณีผู้ท้าชิง และกรณีล้างสนาม
+            let used = [];
+            let slots = [];
+            for (let i = 0; i < expected; i++) {
+                if (getAvailablePlayers(used).length < 2) break;
+                let tA = selectTeam(used);
+                if (!tA || tA.length < 2 || !tA[0] || !tA[1]) break;
+
+                let fullMatchObj = null;
+                if (getAvailablePlayers([...used, ...tA]).length >= 2) {
+                    let tB = selectTeam([...used, ...tA]);
+                    if (tB && tB.length >= 2 && tB[0] && tB[1]) {
+                        let optimized = optimizeFourPlayers([tA[0], tA[1], tB[0], tB[1]]);
+                        fullMatchObj = { teamA: [...optimized.teamA], teamB: [...optimized.teamB] };
+                    }
                 }
+                slots.push({ challengers: [tA[0], tA[1]], fullMatch: fullMatchObj });
+                used.push(tA[0], tA[1]);
             }
-            
+
             // บันทึกผลลงความจำ — prepareNextMatch จะดึงผลนี้ไปใช้จริง (ผ่าน consumePreview)
-            cachedNextMatch = {
-                challengers: teamChallenger,
-                fullMatch: fullMatchObj
-            };
-            
-            box.innerHTML = `
-                <div style="background: #f0fdf4; padding: 12px; border-radius: 8px; border: 1px solid #bbf7d0; font-size: 13px; color: #166534; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-                    <strong style="display:block; margin-bottom:6px;">🏸 กรณีหาผู้ท้าชิงแชมป์:</strong>
-                    <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #dcfce3;">${display1}</div>
-                </div>
-                <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 13px; color: #334155; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-                    <strong style="display:block; margin-bottom:6px;">⚔️ กรณีล้างสนามจัดใหม่ (ประเภทคู่):</strong>
-                    <div style="font-weight: bold; font-size: 15px; text-align: center; background: white; padding: 10px; border-radius: 6px; border: 1px solid #f1f5f9;">${display2}</div>
-                </div>
-                <div style="font-size: 12px; color: #64748b; text-align: center;">🔒 ผลนี้จะถูกใช้จริงในคอร์ทที่จบแมตช์ก่อน (ถ้ามีการพักผู้เล่น/เพิ่ม-ลบคน/ล็อคคู่ ระบบจะล้างพรีวิวให้)</div>`;
+            cachedNextMatch = { expected, slots };
+            renderPreviewBox();
         }
 
     function lockPair() {
