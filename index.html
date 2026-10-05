@@ -211,7 +211,7 @@
                 
                 <div style="background: #fff0f6; padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #fbcfe8;">
                     <strong style="color: #be185d; font-size: 14px;">🛌 เลือกผู้เล่นนั่งพักชั่วคราว</strong>
-                    <p style="font-size: 12px; color: #9d174d; margin: 5px 0 10px 0;">ระบบจะไม่ดึงรายชื่อคนที่พักอยู่ลงสนาม จนกว่าจะกดยกเลิก</p>
+                    <p style="font-size: 12px; color: #9d174d; margin: 5px 0 10px 0;">ระบบจะไม่ดึงรายชื่อคนที่พักอยู่ลงสนาม จนกว่าจะกดยกเลิก<br>ถ้าเลือกคนที่กำลังเล่นอยู่ ระบบจะให้คนในคิวลงแทนทันที (คะแนนคงเดิม)</p>
                     <div class="action-flex" style="margin-bottom: 0;">
                         <select id="manualBreakSelect" class="protected-btn">
                             <option value="">-- เลือกผู้เล่น --</option>
@@ -1699,6 +1699,15 @@ function generateAllValidTeams(excludeList) {
         saveData();
     }
 
+    // ลายเซ็นสถานะของ "คอร์ทอื่น" ใช้เทียบก่อนย้อนผล (snapshot เป็นของทั้งระบบ ย้อนแล้วคอร์ทอื่นจะถูกย้อนด้วย)
+    function othersSignature(idx) {
+        return courts.map((c, i) => i === idx ? '' : [
+            c.matchRound, c.scoreA, c.scoreB, c.isGameOver ? 1 : 0, c.isPaused ? 1 : 0,
+            c.teamA && c.teamA.p1, c.teamA && c.teamA.p2,
+            c.teamB && c.teamB.p1, c.teamB && c.teamB.p2
+        ].join(',')).join('|');
+    }
+
     function addScore(courtIndex, team) {
             let court = courts[courtIndex];
             if (court.isGameOver || court.isPaused) return;
@@ -1713,6 +1722,7 @@ function generateAllValidTeams(excludeList) {
             // เซฟข้อมูลเฉพาะตอนที่แต้มถึงจุดที่ "จบเกม" เท่านั้น ไม่ต้องเซฟทุกแต้มเพื่อประหยัด RAM
             if (maxScore >= targetWin && (maxScore - minScore >= 2 || maxScore === 30)) {
                 court.stateBeforeFinishStr = createDeepSnapshot(); 
+                court.undoSig = othersSignature(courtIndex);
             }
 
             if (team === 'A') court.scoreA++; else court.scoreB++;
@@ -1927,6 +1937,10 @@ function generateAllValidTeams(excludeList) {
     function undoFinishMatch(courtIndex) {
             let court = courts[courtIndex];
             if(!court.stateBeforeFinishStr) return;
+
+            if (court.undoSig !== undefined && court.undoSig !== othersSignature(courtIndex)) {
+                if (!confirm('⚠️ คอร์ทอื่นมีความคืบหน้าหลังจากแมตช์นี้แล้ว\nถ้าย้อนผล ความคืบหน้าของคอร์ทอื่นจะหายไปด้วย ยืนยันหรือไม่?')) return;
+            }
             
             if(!confirm('คุณต้องการย้อนกลับไปแก้ไขผลแมตช์ก่อนหน้านี้ใช่หรือไม่?\n(ระบบจะดึงรายชื่อและคะแนนทั้งหมดกลับมาเหมือนตอนก่อนจบเกม)')) return;
 
@@ -2003,17 +2017,90 @@ function generateAllValidTeams(excludeList) {
         togglePlayerBreak(name);
     }
 
+    // หาตำแหน่งของผู้เล่นบนคอร์ทที่กำลังเปิดใช้งาน (ไม่รวมคอร์ทที่พักอยู่)
+    function findOnCourt(name) {
+        for (let i = 0; i < courts.length; i++) {
+            let c = courts[i];
+            if (c.isPaused) continue;
+            for (let side of ['teamA', 'teamB']) {
+                let t = c[side];
+                if (!t) continue;
+                if (t.p1 === name) return { court: c, index: i, side: side, slot: 'p1' };
+                if (t.p2 === name) return { court: c, index: i, side: side, slot: 'p2' };
+            }
+        }
+        return null;
+    }
+
+    // เลือกคนในคิวมาลงแทน: รอนานสุดก่อน → เคยเป็นคู่กับเพื่อนร่วมทีมน้อยสุด → ลงเล่นน้อยสุด (เท่ากันสุ่ม)
+    // เลี่ยงคนที่ล็อคคู่ เพื่อไม่ดึงคู่ล็อคมาแยกกัน (ถ้าไม่มีทางเลือกอื่นค่อยใช้)
+    function pickReplacement(loc) {
+        let team = loc.court[loc.side];
+        let mate = loc.slot === 'p1' ? team.p2 : team.p1; // singles → undefined
+        let avail = getAvailablePlayers([]);
+        let nonLocked = avail.filter(p => !lockedPairs[p]);
+        let cands = nonLocked.length > 0 ? nonLocked : avail;
+        if (cands.length === 0) return null;
+        const wr = p => (playerStats[p] && playerStats[p].waitingRounds) || 0;
+        const pl = p => (playerStats[p] && playerStats[p].played) || 0;
+        const hist = p => mate ? ((historyPairs[mate] && historyPairs[mate][p]) || 0) : 0;
+        return shuffleArray(cands).sort((a, b) => (wr(b) - wr(a)) || (hist(a) - hist(b)) || (pl(a) - pl(b)))[0];
+    }
+
+    // พักผู้เล่นที่กำลังแข่งอยู่: ให้คนในคิวลงแทนทันที คะแนนคงเดิม
+    function breakPlayerOnCourt(name, loc) {
+        let court = loc.court;
+        let replacement = pickReplacement(loc);
+        if (!replacement) {
+            alert('ตอนนี้ไม่มีผู้เล่นว่างในคิวมาลงแทนได้ครับ\nลองรอให้คอร์ทอื่นจบก่อน หรือกด ⏸️ พักคอร์ท แทน');
+            return;
+        }
+        if (!confirm(`${name} กำลังแข่งอยู่ใน ${court.name}\n\nระบบจะให้ ${replacement} ลงแทนทันที (คะแนนปัจจุบันคงเดิม)\nและ ${name} จะไปนั่งพัก ยืนยันหรือไม่?`)) return;
+
+        clearPreviewCache();
+        undoPartnerships(court.teamA, court.teamB); // ถอนประวัติจับคู่ของทีมเดิมก่อน แล้วบันทึกใหม่หลังสลับ
+
+        // ถ้าคนที่พักเป็นส่วนหนึ่งของแชมป์ ทีมนี้ไม่ใช่แชมป์คู่เดิมอีกแล้ว
+        if (court.currentChamp && (court.currentChamp.p1 === name || court.currentChamp.p2 === name)) {
+            court.currentChamp = null;
+        }
+
+        court[loc.side][loc.slot] = replacement;
+        pullPlayer(replacement);
+        pushToEliminated(name); // ไปอยู่ในลิสต์นั่งพัก (onBreak ทำให้ระบบไม่ดึงลงสนาม)
+        if (!playerStats[name]) playerStats[name] = {};
+        playerStats[name].onBreak = true;
+
+        recordPartnerships(court.teamA, court.teamB);
+        renderAll();
+        saveData();
+        alert(`✅ ${replacement} ลงแทน ${name} แล้ว (${name} นั่งพัก 🛌)`);
+    }
+
+    // คอร์ทที่เพิ่งจบเกม ผู้ชนะที่ยังเป็นแชมป์ต่อยังไม่อยู่ในคิว: ถ้าจะพักต้องให้ทั้งทีมลงจากการเป็นแชมป์
+    // คืน false ถ้าผู้ใช้ยกเลิก
+    function stepDownChampion(name, loc) {
+        let data = loc.court.nextMatchData;
+        if (!data || !data.winner) { alert('ไม่สามารถพักผู้เล่นคนนี้ได้ในขณะนี้ครับ'); return false; }
+        let winner = data.winner;
+        if (winner.p1 !== name && winner.p2 !== name) return true;
+        if (!confirm(`${name} เป็นแชมป์ที่ชนะเกมล่าสุดของ ${loc.court.name}\n\nการพักจะทำให้ทีมนี้ลงจากการเป็นแชมป์ทั้งทีม (คู่ของเขาจะกลับไปรอคิว) ยืนยันหรือไม่?`)) return false;
+        [winner.p1, winner.p2].filter(Boolean).forEach(p => {
+            if (playerStats[p]) playerStats[p].lastBenchTime = globalMatchCounter + 1;
+            pushToEliminated(p);
+        });
+        data.isChampOut = true;
+        return true;
+    }
+
     function togglePlayerBreak(name) {
         clearPreviewCache();
-        let onCourt = false;
-        courts.forEach(c => {
-            if(!c.isPaused && ((c.teamA && (c.teamA.p1 === name || c.teamA.p2 === name)) || 
-               (c.teamB && (c.teamB.p1 === name || c.teamB.p2 === name)))) onCourt = true;
-        });
-
-        if(onCourt) { 
-            alert('ไม่สามารถเปิดโหมดพักให้กับผู้เล่นที่กำลังตีอยู่ในสนามได้ครับ 🏸'); 
-            return; 
+        let loc = findOnCourt(name);
+        if (loc) {
+            if (!loc.court.isGameOver) { breakPlayerOnCourt(name, loc); return; }
+            // เกมจบแล้วรอจัดคู่ถัดไป: คนแพ้อยู่ในคิวแล้ว สลับสถานะได้เลย / ผู้ชนะที่เป็นแชมป์ต่อต้องลงจากแชมป์ก่อน
+            let inQueue = mainQueue.includes(name) || eliminatedOrder.includes(name);
+            if (!inQueue && !stepDownChampion(name, loc)) return;
         }
 
         if(!playerStats[name]) playerStats[name] = {};
@@ -2307,6 +2394,7 @@ function generateAllValidTeams(excludeList) {
         let breakSelectHtml = '<option value="">-- เลือกผู้เล่น --</option>';
         players.forEach(p => {
             let status = (playerStats[p] && playerStats[p].onBreak) ? ' (สถานะ: พักอยู่)' : '';
+            if (!status && findOnCourt(p) && !mainQueue.includes(p) && !eliminatedOrder.includes(p)) status = ' (กำลังเล่น 🏸)';
             breakSelectHtml += `<option value="${p}">${p}${status}</option>`;
         });
         let manualBreakEl = document.getElementById('manualBreakSelect');
