@@ -164,6 +164,7 @@
         <div class="top-nav">
             <div>
                 <div style="font-size: 18px; font-weight: bold;">กระดานแข่งขัน <span style="font-size:12px; color:#10b981;">(🟢 ออนไลน์)</span></div>
+                <div id="shuttleTotal" style="display:none; font-size: 13px; color: #0369a1; margin-top: 6px; background: #e0f2fe; padding: 4px 10px; border-radius: 6px; width: fit-content;"></div>
                 <div id="timeDisplay" style="font-size: 13px; color: #64748b; margin-top: 6px; display: none; background: var(--light); padding: 4px 10px; border-radius: 6px;"></div>
             </div>
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
@@ -334,6 +335,7 @@
     let recentOpponents = []; // opponent pairs ล่าสุด → Champion Bias
     let eliminatedOrder = []; 
     let matchHistory = [];
+    let shuttleClosedTotal = 0; // ลูกแบดของคอร์ดที่ถูกปิดกลางเกม (เก็บรวมไว้ไม่ให้หาย)
     let playerStats = {};
     let lockedPairs = {}; 
     
@@ -576,6 +578,7 @@
                     if(!eliminatedOrder.includes(p) && !mainQueue.includes(p)) eliminatedOrder.unshift(p); 
                 });
             }
+            courts.slice(newNumCourts).forEach(c => { shuttleClosedTotal += (c.shuttles || 0); });
             courts.splice(newNumCourts); 
         }
 
@@ -672,7 +675,7 @@
         }
 
     function initFreshData() {
-        eliminatedOrder = []; matchHistory = []; courts = [];
+        eliminatedOrder = []; matchHistory = []; courts = []; shuttleClosedTotal = 0;
         historyPairs = {}; playerStats = {}; lockedPairs = {}; 
         globalMatchCounter = 0;
         
@@ -1967,7 +1970,11 @@ function generateAllValidTeams(excludeList) {
             
             if(!confirm('คุณต้องการย้อนกลับไปแก้ไขผลแมตช์ก่อนหน้านี้ใช่หรือไม่?\n(ระบบจะดึงรายชื่อและคะแนนทั้งหมดกลับมาเหมือนตอนก่อนจบเกม)')) return;
 
+            // ลูกแบดที่ใช้ไปแล้วเป็นของจริง ย้อนผลแมตช์ต้องไม่ทำให้ยอดลูกถอยหลัง
+            let keepShuttles = courts.map(c => c.shuttles || 0), keepClosed = shuttleClosedTotal;
             restoreSnapshot(JSON.parse(court.stateBeforeFinishStr));
+            courts.forEach((c, k) => { if (keepShuttles[k] !== undefined) c.shuttles = keepShuttles[k]; });
+            shuttleClosedTotal = keepClosed;
             renderAll();
             saveData();
         }
@@ -2303,9 +2310,22 @@ function generateAllValidTeams(excludeList) {
             });
 
             localStorage.setItem('badminton_billing_players', JSON.stringify(billingData));
+            localStorage.setItem('badminton_billing_shuttles', String(totalShuttles()));
             if(startTimeCalculated) localStorage.setItem('badminton_billing_start_time', startTimeCalculated);
             window.location.href = 'billing.html'; 
         }
+
+    // --- นับลูกแบดต่อคอร์ท ---
+    function totalShuttles() {
+        return shuttleClosedTotal + courts.reduce((sum, c) => sum + (c.shuttles || 0), 0);
+    }
+    window.changeShuttles = function(courtIndex, delta) {
+        let court = courts[courtIndex];
+        if (!court) return;
+        court.shuttles = Math.max(0, (court.shuttles || 0) + delta);
+        renderAll();
+        saveData();
+    };
 
     // --- ตัวจับเวลาแต่ละคอร์ท (แสดงผลอย่างเดียว ไม่มีแจ้งเตือน) ---
     // เก็บ timerStart/timerEnd/lastDuration ไว้ในอ็อบเจกต์ court จึงซิงก์ข้ามเครื่องและรอดการรีโหลด
@@ -2429,11 +2449,23 @@ function generateAllValidTeams(excludeList) {
                         <button class="btn-minus protected-btn" onclick="decreaseScore(${i}, 'B', event)">-1 ลดแต้ม</button>
                     </div>
                 </div>
+                <div style="display:flex; align-items:center; justify-content:center; gap:10px; margin-top:12px; font-size:14px; color:#475569;">
+                    <span>🏸 ลูกที่ใช้</span>
+                    <button class="protected-btn" onclick="changeShuttles(${i}, -1)" style="width:34px; margin:0; padding:4px 0; border:none; border-radius:8px; background:#e2e8f0; color:#334155; font-weight:bold; cursor:pointer;">−</button>
+                    <strong style="min-width:28px; text-align:center; font-size:18px; color:var(--dark);">${court.shuttles || 0}</strong>
+                    <button class="protected-btn" onclick="changeShuttles(${i}, 1)" style="width:34px; margin:0; padding:4px 0; border:none; border-radius:8px; background:var(--primary); color:#fff; font-weight:bold; cursor:pointer;">+</button>
+                </div>
                 ${controlsHtml}
             </div>`;
         });
         document.getElementById('courtsContainer').innerHTML = courtsHtml;
         updateCourtTimers();
+        let shuttleEl = document.getElementById('shuttleTotal');
+        if (shuttleEl) {
+            let ts = totalShuttles();
+            shuttleEl.style.display = ts > 0 ? 'block' : 'none';
+            shuttleEl.textContent = `🏸 ลูกที่ใช้รวม ${ts} ลูก`;
+        }
 
         // แยกกลุ่มตามสถานะจริง (แสดงผลเท่านั้น ไม่กระทบลอจิกจัดคิว)
         //  - เขียว "รอลงสนาม": พักครบแล้ว พร้อมถูกเลือกในแมตช์ถัดไป
@@ -2549,7 +2581,7 @@ function generateAllValidTeams(excludeList) {
                 players, mainQueue, historyPairs, opponentHistory, recentPairs, recentOpponents, eliminatedOrder, 
                 matchHistory, playerStats, lockedPairs, numCourts, 
                 winScore, maxChamps, courts: cleanCourts,
-                startTimeExact, startTimeCalculated, globalMatchCounter
+                startTimeExact, startTimeCalculated, globalMatchCounter, shuttleClosedTotal
             });
         }
 
@@ -2570,6 +2602,7 @@ function generateAllValidTeams(excludeList) {
             startTimeExact = st.startTimeExact || null;
             startTimeCalculated = st.startTimeCalculated || null;
             globalMatchCounter = st.globalMatchCounter || 0;
+            shuttleClosedTotal = st.shuttleClosedTotal || 0;
             
             // 🔥 จุดสำคัญ: แอบเก็บข้อมูลคอร์ทที่มีปุ่มย้อนผลของเครื่องตัวเองเอาไว้ก่อนโดน Firebase ทับ
             let oldCourts = courts;
@@ -2619,7 +2652,7 @@ function generateAllValidTeams(excludeList) {
             let st = playerStats[n] || {};
             slimStats[n] = { arrivalTime: st.arrivalTime, played: st.played, wins: st.wins, losses: st.losses };
         });
-        let currentState = JSON.stringify({ players, playerStats: slimStats, matchHistory });
+        let currentState = JSON.stringify({ players, playerStats: slimStats, matchHistory, shuttles: totalShuttles() });
         let historyStr = localStorage.getItem('badminton_past_sessions');
         let historyList = historyStr ? JSON.parse(historyStr) : [];
         let dateStr = new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
@@ -2820,6 +2853,7 @@ function generateAllValidTeams(excludeList) {
 
         document.getElementById('historyDetailContent').innerHTML = `
             <div class="detail-section"><h5>👥 รายชื่อผู้เล่น & สถิติภาพรวม</h5><div style="display:flex; flex-wrap:wrap; margin-top:5px;">${pListHtml}</div></div>
+            ${oldState.shuttles ? `<div class="detail-section" style="margin-top:20px;"><h5>🏸 ลูกแบดที่ใช้ทั้งหมด: ${escapeHTML(oldState.shuttles)} ลูก</h5></div>` : ''}
             <div class="detail-section" style="margin-top:20px;"><h5>🏸 ผลการแข่งขันแต่ละแมตช์</h5><div style="max-height:280px; overflow-y:auto; background:#ffffff; padding:12px; border-radius:8px; margin-top:5px; border:1px solid #e2e8f0;">${matchLinesHtml}</div></div>
             <div style="margin-top:20px; text-align:center; font-size:12px; color:#94a3b8;">* ข้อมูลนี้ถูกดึงมาจากระบบบันทึกความจำ LocalStorage ของเครื่องคุณ</div>`;
         document.getElementById('historyDetailModal').style.display = 'flex';

@@ -162,6 +162,8 @@
         let savedStartTime = localStorage.getItem("badminton_billing_start_time");
         let startTimeInput = document.getElementById('courtStartTime');
         if (savedStartTime) startTimeInput.value = savedStartTime;
+        let savedShuttles = parseInt(localStorage.getItem("badminton_billing_shuttles"));
+        if (savedShuttles > 0) document.getElementById('shuttleCount').value = savedShuttles;
         
         let savedPlayers = localStorage.getItem("badminton_billing_players");
         let container = document.getElementById('playersContainer');
