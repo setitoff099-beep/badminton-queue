@@ -145,6 +145,7 @@
                         <br><span style="font-size:12px; color:var(--primary); font-weight:normal;">💡 ทริค: หากต้องการล็อคคู่ตั้งแต่แรก ให้พิมพ์ชื่อติดกันด้วยเครื่องหมายบวก เช่น <strong>เจ๋ง+จี</strong></span>
                     </label>
                     <textarea id="playerInput" rows="8" placeholder="เจ๋ง+จี&#10;นนท์นี่&#10;กาย&#10;ฟ้า+เบนซ์&#10;ป๊อบ&#10;อาร์ท"></textarea>
+        <div style="font-size:12px; color:#64748b; margin:6px 0 0;">ระบุระดับฝีมือได้โดยพิมพ์ต่อท้ายชื่อ เช่น <b>เจ๋ง:A</b> หรือ <b>เจ๋ง:A+จี:C</b> (A=มือแข็ง, B=ปานกลาง, C=มือใหม่) ถ้าไม่ระบุถือเป็น B และระบบจำระดับไว้ใช้รอบหน้า</div>
                 </div>
         <div class="form-group">
             <label>3. คะแนนชนะในแต่ละเกม (เริ่มต้น):</label>
@@ -177,6 +178,9 @@
                 </button>
                 <button class="protected-btn" onclick="goToBilling()" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; outline: none; font-weight: bold; font-family: inherit; cursor: pointer; transition: 0.3s; color: white; background: var(--teal); width: auto; font-size: 14px;">
                     💸 คิดเงิน
+                </button>
+                <button class="protected-btn" onclick="showLevels()" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; outline: none; font-weight: bold; font-family: inherit; cursor: pointer; color: white; background: var(--warning); width: auto; font-size: 14px;">
+                    🎚 ระดับฝีมือ
                 </button>
                 <button onclick="showLeaderboard()" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; outline: none; font-weight: bold; font-family: inherit; cursor: pointer; color: white; background: var(--purple); width: auto; font-size: 14px;">
                     🏆 อันดับสะสม
@@ -278,12 +282,32 @@
     </table>
 </div>
 
+<div id="levelModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 560px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h2 style="margin:0; color:var(--dark);">🎚 ระดับฝีมือผู้เล่น</h2>
+            <button onclick="closeLevels()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#94a3b8; width:auto; padding:0; margin:0;">✖</button>
+        </div>
+        <div style="font-size:13px; color:#64748b; margin-bottom:12px;">A = มือแข็ง | B = ปานกลาง (ค่าเริ่มต้น) | C = มือใหม่<br>ระบบใช้ระดับถ่วงน้ำหนักตอนแบ่งทีมและเลือกคู่แข่ง โดยลำดับคิวยังมาก่อน (โหมดเข้มอาจทำให้บางคนรอเพิ่มเล็กน้อย)</div>
+        <label style="font-weight:bold; font-size:14px;">ความเข้มของการถ่วงสมดุล</label>
+        <select id="levelStrengthSel" onchange="setLevelStrength(this.value)" style="margin-bottom:12px;">
+            <option value="0">ปิด (ไม่ใช้ระดับ)</option>
+            <option value="0.5">เบา</option>
+            <option value="1">ปกติ</option>
+            <option value="2">เข้ม (สมดุลขึ้น แต่อาจรอเพิ่ม)</option>
+        </select>
+        <div id="levelSummary" style="font-size:13px; color:#475569; margin-bottom:8px;"></div>
+        <div id="levelList" style="max-height:50vh; overflow-y:auto;"></div>
+    </div>
+</div>
+
 <div id="leaderboardModal" class="modal-overlay">
     <div class="modal-box" style="max-width: 700px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
             <h2 style="margin:0; color:var(--dark);">🏆 ตารางอันดับสะสม</h2>
             <button onclick="closeLeaderboard()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#94a3b8; width:auto; padding:0; margin:0;">✖</button>
         </div>
+        <div id="lbTabBar" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;"></div>
         <div id="lbSortBar" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;"></div>
         <div id="leaderboardContainer"></div>
         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:15px; flex-wrap:wrap;">
@@ -337,6 +361,28 @@
     let eliminatedOrder = []; 
     let matchHistory = [];
     let shuttleClosedTotal = 0; // ลูกแบดของคอร์ดที่ถูกปิดกลางเกม (เก็บรวมไว้ไม่ให้หาย)
+    // ระดับฝีมือ: A=มือแข็ง B=ปานกลาง(ค่าเริ่มต้น) C=มือใหม่ ใช้แบ่งทีมให้สมดุลเท่านั้น ไม่มีผลต่อลำดับคิว
+    let playerLevels = {};
+    let levelStrength = parseFloat(localStorage.getItem('badminton_level_strength') || '1'); // 0=ปิด 0.5=เบา 1=ปกติ 2=เข้ม
+    const LEVEL_VAL = { A: 3, B: 2, C: 1 };
+    const LEVEL_SPLIT_W = 8; // โทษต่อ 1 ระดับที่ทั้งสองทีมต่างกัน (ตอนแบ่ง 4 คนเป็น 2 ทีม)
+    const LEVEL_CHAL_W = 4;  // โทษต่อ 1 ระดับที่ผู้ท้าชิงต่างจากแชมป์ที่อยู่ต่อ
+    const lvOf = p => LEVEL_VAL[playerLevels[p]] || 2;
+    const lvSum = arr => arr.reduce((t, p) => t + lvOf(p), 0);
+    function levelChalPen(a, b, vsTeam) {
+        if (!levelStrength || !vsTeam || vsTeam.length === 0) return 0;
+        return levelStrength * LEVEL_CHAL_W * Math.abs(lvOf(a) + lvOf(b) - lvSum(vsTeam));
+    }
+    function loadSavedLevels() { try { return JSON.parse(localStorage.getItem('badminton_player_levels') || '{}') || {}; } catch (e) { return {}; } }
+    function saveLevelLocal(name, lv) {
+        const m = loadSavedLevels(); if (lv) m[name] = lv; else delete m[name];
+        try { localStorage.setItem('badminton_player_levels', JSON.stringify(m)); } catch (e) {}
+    }
+    function lvBadge(p) {
+        const l = playerLevels[p]; if (!l) return '';
+        const c = { A: '#dc2626', B: '#2563eb', C: '#16a34a' }[l];
+        return ` <span style="font-size:11px; color:#fff; background:${c}; padding:1px 6px; border-radius:8px;">${l}</span>`;
+    }
     let playerStats = {};
     let lockedPairs = {}; 
     
@@ -619,6 +665,13 @@
             
             // --- ส่วนที่แก้ไขใหม่: ดึงชื่อผู้เล่นและเช็คสัญลักษณ์ + ---
             let rawLines = text.split('\n').map(p => p.trim()).filter(p => p !== "");
+            // รองรับการระบุระดับฝีมือตอนกรอกชื่อ เช่น "เจ๋ง:A" หรือ "เจ๋ง:A+จี:C"
+            let setupLevels = {};
+            rawLines = rawLines.map(line => line.split('+').map(tok => {
+                let mm = tok.trim().match(/^(.*?)\s*[:：]\s*([ABCabc])$/);
+                if (mm && mm[1].trim()) { setupLevels[mm[1].trim()] = mm[2].toUpperCase(); return mm[1].trim(); }
+                return tok.trim();
+            }).join('+'));
             let extractedPlayers = [];
             
             rawLines.forEach(line => {
@@ -654,6 +707,13 @@
             startTimeCalculated = `${h}:${calcM}`;
             
             initFreshData(); // ฟังก์ชันนี้จะเคลียร์ค่า lockedPairs เราจึงต้องเซ็ตค่าใหม่ด้านล่าง
+            {   // ใช้ระดับที่พิมพ์มา หรือระดับที่จำไว้จากรอบก่อน
+                let savedLv = loadSavedLevels();
+                players.forEach(p => {
+                    if (setupLevels[p]) { playerLevels[p] = setupLevels[p]; saveLevelLocal(p, setupLevels[p]); }
+                    else if (savedLv[p]) playerLevels[p] = savedLv[p];
+                });
+            }
             
             // --- ส่วนที่แก้ไขใหม่: บันทึกการล็อคคู่เข้าสู่ระบบ ---
             rawLines.forEach(line => {
@@ -676,7 +736,7 @@
         }
 
     function initFreshData() {
-        eliminatedOrder = []; matchHistory = []; courts = []; shuttleClosedTotal = 0;
+        eliminatedOrder = []; matchHistory = []; courts = []; shuttleClosedTotal = 0; playerLevels = {};
         historyPairs = {}; playerStats = {}; lockedPairs = {}; 
         globalMatchCounter = 0;
         
@@ -870,7 +930,7 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
                         if (isRecentOpponent(pj, o)) rOpp += RECENT_OPP_PENALTY;
                     });
                     let recentPen = isRecentPair(pi, pj) ? 100 : 0; // เบาลงสำหรับ mandatory
-                    let sc = (hist === 0 ? 0 : hist * PARTNER_WEIGHT) + bT + oppS * OPP_WEIGHT + rOpp + recentPen;
+                    let sc = (hist === 0 ? 0 : hist * PARTNER_WEIGHT) + bT + oppS * OPP_WEIGHT + rOpp + recentPen + levelChalPen(pi, pj, vsTeam);
                     return { pair: [pi, pj], score: sc, isFresh: hist === 0 };
                 });
 
@@ -940,7 +1000,7 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
                 let benchTerm = nonLinearBench(pi) + nonLinearBench(pj);
 
                 if (hist === 0) {
-                    freshPairs.push({ pair: [pi, pj], oppScore, diversityBonus, recent, recentOppPenalty, benchTerm });
+                    freshPairs.push({ pair: [pi, pj], oppScore, diversityBonus, recent, recentOppPenalty, benchTerm, lv: levelChalPen(pi, pj, vsTeam) });
                 } else {
                     let recentPenalty = recent ? 500 : 0;
                     let score = hist * PARTNER_WEIGHT
@@ -948,7 +1008,8 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
                               + oppScore * OPP_WEIGHT
                               + recentOppPenalty
                               + diversityBonus * dynamicDiversityWeight
-                              + recentPenalty;
+                              + recentPenalty
+                              + levelChalPen(pi, pj, vsTeam);
                     allUsedPairs.push({ pair: [pi, pj], score });
                 }
             }
@@ -965,8 +1026,8 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
             //   เก้น (รอ 3 รอบ) → benchTerm = -12, freshScore = -12
             //   ฟ่า  (รอ 3 รอบ) → benchTerm = -12, freshScore = -12
             //   เก้น+ฟ่า together → freshScore = -24 → ชนะชัดเจน ✅
-            let minFreshScore = Math.min(...activeFresh.map(f => f.oppScore + f.recentOppPenalty + f.benchTerm));
-            let scoreFiltered = activeFresh.filter(f => f.oppScore + f.recentOppPenalty + f.benchTerm <= minFreshScore + SCORE_TOLERANCE);
+            let minFreshScore = Math.min(...activeFresh.map(f => f.oppScore + f.recentOppPenalty + f.benchTerm + f.lv));
+            let scoreFiltered = activeFresh.filter(f => f.oppScore + f.recentOppPenalty + f.benchTerm + f.lv <= minFreshScore + SCORE_TOLERANCE);
             // tiebreak ด้วย diversityBonus
             let minDiv = Math.min(...scoreFiltered.map(f => f.diversityBonus));
             let bestFresh = scoreFiltered.filter(f => f.diversityBonus <= minDiv + SCORE_TOLERANCE * 2);
@@ -979,7 +1040,7 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
                     candidates: freshPairs.map(f => ({
                         คู่: f.pair.join('+'), oppScore: f.oppScore, recentOppPenalty: f.recentOppPenalty,
                         benchTerm: f.benchTerm, diversityBonus: f.diversityBonus, recent: f.recent,
-                        freshScore: f.oppScore + f.recentOppPenalty + f.benchTerm
+                        freshScore: f.oppScore + f.recentOppPenalty + f.benchTerm + f.lv
                     })),
                     selected: chosenFresh,
                     เหตุผล: `เลือกจากคู่ใหม่ (hist=0) ที่มี oppScore+recentOppPenalty+benchTerm ต่ำสุด`
@@ -1057,7 +1118,8 @@ function optimizeFourPlayers(pArr) {
         }));
         if (oppScore > 0) penalty += oppScore * OPP_WEIGHT;
 
-        const totalWeight = wA + wB + penalty;
+        const levelPen = levelStrength * LEVEL_SPLIT_W * Math.abs(lvSum(combo.teamA) - lvSum(combo.teamB));
+        const totalWeight = wA + wB + penalty + levelPen;
         
         if (totalWeight < minWeight) {
             minWeight = totalWeight;
@@ -1857,6 +1919,7 @@ function generateAllValidTeams(excludeList) {
         matchHistory.push({ 
             courtName: court.name, round: court.matchRound, 
             duration: court.timerStart ? court.timerEnd - court.timerStart : null,
+            win: [...winnerArr], lose: [...loserArr],
             result: `${winText} ชนะ ${loseText} [${court.scoreA}-${court.scoreB}] ${champStatus}` 
         });
         
@@ -1972,10 +2035,10 @@ function generateAllValidTeams(excludeList) {
             if(!confirm('คุณต้องการย้อนกลับไปแก้ไขผลแมตช์ก่อนหน้านี้ใช่หรือไม่?\n(ระบบจะดึงรายชื่อและคะแนนทั้งหมดกลับมาเหมือนตอนก่อนจบเกม)')) return;
 
             // ลูกแบดที่ใช้ไปแล้วเป็นของจริง ย้อนผลแมตช์ต้องไม่ทำให้ยอดลูกถอยหลัง
-            let keepShuttles = courts.map(c => c.shuttles || 0), keepClosed = shuttleClosedTotal;
+            let keepShuttles = courts.map(c => c.shuttles || 0), keepClosed = shuttleClosedTotal, keepLv = playerLevels, keepStrength = levelStrength;
             restoreSnapshot(JSON.parse(court.stateBeforeFinishStr));
             courts.forEach((c, k) => { if (keepShuttles[k] !== undefined) c.shuttles = keepShuttles[k]; });
-            shuttleClosedTotal = keepClosed;
+            shuttleClosedTotal = keepClosed; playerLevels = keepLv; levelStrength = keepStrength;
             renderAll();
             saveData();
         }
@@ -2231,6 +2294,7 @@ function generateAllValidTeams(excludeList) {
         if (!opponentHistory[name]) opponentHistory[name] = {};
         players.forEach(p => { if(p !== name) { if(!opponentHistory[p]) opponentHistory[p] = {}; opponentHistory[p][name] = opponentHistory[p][name] || 0; opponentHistory[name][p] = opponentHistory[name][p] || 0; } });
 
+        { let sl = loadSavedLevels(); if (sl[name]) playerLevels[name] = sl[name]; }
         eliminatedOrder.push(name); 
         document.getElementById('newPlayerInput').value = '';
         renderAll(); saveData();
@@ -2481,7 +2545,7 @@ function generateAllValidTeams(excludeList) {
         });
         const makeTag = (p, cls) => {
             let isBreak = playerStats[p] && playerStats[p].onBreak;
-            return `<span class="tag ${isBreak ? 'tag-break' : cls}">${getDisplayName(p)}${isBreak ? ' 🛌' : ''}</span>`;
+            return `<span class="tag ${isBreak ? 'tag-break' : cls}">${getDisplayName(p)}${lvBadge(p)}${isBreak ? ' 🛌' : ''}</span>`;
         };
         document.getElementById('queueList').innerHTML = readyList.map(p => makeTag(p, 'tag-wait')).join(' ') || "-";
         document.getElementById('eliminatedList').innerHTML = restList.map(p => makeTag(p, 'tag-rest')).join(' ') || "-";
@@ -2497,7 +2561,7 @@ function generateAllValidTeams(excludeList) {
         
         document.querySelector('#playerStatTable tbody').innerHTML = players.map(p => 
             `<tr>
-                <td style="text-align:left; font-weight:bold;">${getDisplayName(p)}${(playerStats[p] && playerStats[p].onBreak) ? ' 🛌' : ''}</td>
+                <td style="text-align:left; font-weight:bold;">${getDisplayName(p)}${lvBadge(p)}${(playerStats[p] && playerStats[p].onBreak) ? ' 🛌' : ''}</td>
                 <td style="color:#475569; font-weight:bold;">${playerStats[p].arrivalTime || '-'}</td>
                 <td>${playerStats[p].played}</td>
                 <td style="color:var(--success);">${playerStats[p].wins}</td>
@@ -2582,7 +2646,7 @@ function generateAllValidTeams(excludeList) {
                 players, mainQueue, historyPairs, opponentHistory, recentPairs, recentOpponents, eliminatedOrder, 
                 matchHistory, playerStats, lockedPairs, numCourts, 
                 winScore, maxChamps, courts: cleanCourts,
-                startTimeExact, startTimeCalculated, globalMatchCounter, shuttleClosedTotal
+                startTimeExact, startTimeCalculated, globalMatchCounter, shuttleClosedTotal, playerLevels, levelStrength
             });
         }
 
@@ -2604,6 +2668,8 @@ function generateAllValidTeams(excludeList) {
             startTimeCalculated = st.startTimeCalculated || null;
             globalMatchCounter = st.globalMatchCounter || 0;
             shuttleClosedTotal = st.shuttleClosedTotal || 0;
+            playerLevels = st.playerLevels || {};
+            if (st.levelStrength !== undefined) levelStrength = st.levelStrength;
             
             // 🔥 จุดสำคัญ: แอบเก็บข้อมูลคอร์ทที่มีปุ่มย้อนผลของเครื่องตัวเองเอาไว้ก่อนโดน Firebase ทับ
             let oldCourts = courts;
@@ -2659,13 +2725,97 @@ function generateAllValidTeams(excludeList) {
         let dateStr = new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
         let sessionId = Date.now();
         historyList.unshift({ id: sessionId, date: dateStr, matchCount: matchHistory.length, playerCount: players.length, snapshot: currentState }); 
-        logSessionStats(sessionId, dateStr, playerStats);
+        logSessionStats(sessionId, dateStr, playerStats, matchHistory);
         try {
             localStorage.setItem('badminton_past_sessions', JSON.stringify(historyList));
         } catch (e) {
             return false;
         }
         return true;
+    }
+
+    // --- ระดับฝีมือ (หน้าต่างตั้งค่า) ---
+    window.showLevels = function() { renderLevels(); document.getElementById('levelModal').style.display = 'flex'; };
+    window.closeLevels = function() { document.getElementById('levelModal').style.display = 'none'; };
+    window.setLevelIdx = function(i, lv) {
+        const name = players[i]; if (name === undefined) return;
+        if (lv) playerLevels[name] = lv; else delete playerLevels[name];
+        saveLevelLocal(name, lv);
+        clearPreviewCache(); renderLevels(); renderAll(); saveData();
+    };
+    window.setLevelStrength = function(v) {
+        levelStrength = parseFloat(v) || 0;
+        try { localStorage.setItem('badminton_level_strength', String(levelStrength)); } catch (e) {}
+        clearPreviewCache(); saveData();
+    };
+    function renderLevels() {
+        document.getElementById('levelStrengthSel').value = String(levelStrength);
+        const cnt = { A: 0, B: 0, C: 0 };
+        players.forEach(p => { cnt[playerLevels[p] || 'B']++; });
+        document.getElementById('levelSummary').textContent = `A: ${cnt.A} คน | B: ${cnt.B} คน | C: ${cnt.C} คน`;
+        const colors = { A: '#dc2626', B: '#2563eb', C: '#16a34a' };
+        document.getElementById('levelList').innerHTML = players.map((p, i) => {
+            const cur = playerLevels[p] || '';
+            const b = l => `<button onclick="setLevelIdx(${i}, '${l}')" style="width:44px; margin:0; padding:6px 0; border:none; border-radius:8px; font-weight:bold; cursor:pointer; background:${cur === l ? colors[l] : '#e2e8f0'}; color:${cur === l ? '#fff' : '#334155'};">${l}</button>`;
+            return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 4px; border-bottom:1px solid #f1f5f9;">
+                <span style="font-weight:bold; word-break:break-word;">${escapeHTML(p)}${cur ? '' : ' <span style="font-weight:normal; color:#94a3b8; font-size:12px;">(ยังไม่ระบุ = B)</span>'}</span>
+                <span style="display:flex; gap:6px;">${b('A')}${b('B')}${b('C')}</span></div>`;
+        }).join('') || '<div style="color:#94a3b8; text-align:center; padding:20px;">ยังไม่มีผู้เล่น</div>';
+    }
+
+    // --- สถิติคู่หู / คู่ปรับ ---
+    // คู่หู: 2 คนที่ลงเป็นทีมเดียวกัน (นับเกมและชนะ) | คู่ปรับ: คนที่เจอกันคนละฝั่ง (นับเกมและผลหัวต่อหัว)
+    const relKey = (a, b) => a < b ? a + '|' + b : b + '|' + a;
+    function addRelations(mh, P, R) {
+        (mh || []).forEach(m => {
+            if (!m.win || !m.lose) return; // แมตช์ก่อนอัปเดตไม่มีข้อมูลรายคน
+            [[m.win, 1], [m.lose, 0]].forEach(([arr, won]) => {
+                if (arr.length === 2) { const e = P[relKey(arr[0], arr[1])] || (P[relKey(arr[0], arr[1])] = { g: 0, w: 0 }); e.g++; e.w += won; }
+            });
+            m.win.forEach(w => m.lose.forEach(l => {
+                const k = relKey(w, l), e = R[k] || (R[k] = { g: 0, f: 0 });
+                e.g++; if (w < l) e.f++; // f = จำนวนที่คนแรกในคีย์ชนะ
+            }));
+        });
+    }
+    function mergeRel(dst, src) {
+        Object.keys(src || {}).forEach(k => {
+            const d = dst[k] || (dst[k] = {});
+            Object.keys(src[k]).forEach(f => { d[f] = (d[f] || 0) + src[k][f]; });
+        });
+    }
+    let lbTab = 'rank', relSort = 'rate';
+    window.setLbTab = function(t) { lbTab = t; renderLeaderboard(); };
+    window.setRelSort = function(m) { relSort = m; renderLeaderboard(); };
+    function renderLbTabs() {
+        const tabs = [['rank', '🏆 อันดับ'], ['pairs', '🤝 คู่หู'], ['rivals', '⚔️ คู่ปรับ']];
+        document.getElementById('lbTabBar').innerHTML = tabs.map(([k, label]) =>
+            `<button onclick="setLbTab('${k}')" style="width:auto; margin:0; padding:8px 16px; border-radius:20px; border:none; font-weight:bold; font-size:14px; cursor:pointer; background:${lbTab === k ? 'var(--dark)' : '#e2e8f0'}; color:${lbTab === k ? '#fff' : '#334155'};">${label}</button>`).join('');
+    }
+    function renderRelations() {
+        const P = {}, R = {};
+        readStatsLog().forEach(sess => { mergeRel(P, sess.pairs); mergeRel(R, sess.rivals); });
+        if (players.length > 0 && matchHistory.length > 0) addRelations(matchHistory, P, R);
+        const isPair = lbTab === 'pairs', src = isPair ? P : R, MING = 3;
+        let rows = Object.keys(src).map(k => { const [a, b] = k.split('|'); return { a, b, g: src[k].g, v: isPair ? src[k].w : src[k].f }; });
+        const rate = r => r.v / r.g;
+        if (isPair && relSort === 'rate') { rows = rows.filter(r => r.g >= MING); rows.sort((x, y) => rate(y) - rate(x) || y.g - x.g); }
+        else rows.sort((x, y) => y.g - x.g || (isPair ? rate(y) - rate(x) : 0));
+        rows = rows.slice(0, 30);
+        document.getElementById('lbSortBar').innerHTML = isPair ? [['rate', '% ชนะ (เล่นด้วยกัน ≥ 3 เกม)'], ['games', 'เล่นด้วยกันบ่อยสุด']].map(([k, label]) =>
+            `<button onclick="setRelSort('${k}')" style="width:auto; margin:0; padding:7px 14px; border-radius:8px; border:none; font-weight:bold; font-size:13px; cursor:pointer; background:${relSort === k ? 'var(--purple)' : '#e2e8f0'}; color:${relSort === k ? '#fff' : '#334155'};">${label}</button>`).join('') : '';
+        const c = document.getElementById('leaderboardContainer');
+        if (rows.length === 0) {
+            c.innerHTML = `<div style="text-align:center; padding:30px; color:#94a3b8; background:#f8fafc; border-radius:12px;">ยังไม่มีข้อมูล${isPair && relSort === 'rate' ? ' (ต้องมีคู่ที่เล่นด้วยกันอย่างน้อย 3 เกม)' : ''}<br><span style="font-size:12px;">เก็บข้อมูลตั้งแต่แมตช์ที่เล่นหลังอัปเดตนี้เป็นต้นไป</span></div>`;
+            return;
+        }
+        const medal = ['🥇', '🥈', '🥉'];
+        c.innerHTML = `<div style="overflow-x:auto;"><table><thead><tr><th>#</th><th style="text-align:left;">${isPair ? 'คู่หู' : 'คู่ปรับ'}</th><th>${isPair ? 'เล่นด้วยกัน' : 'เจอกัน'}</th>${isPair ? '<th>ชนะ</th><th>แพ้</th><th>% ชนะ</th>' : '<th>ผลหัวต่อหัว</th>'}</tr></thead><tbody>${rows.map((r, i) => `<tr>
+            <td>${medal[i] || i + 1}</td>
+            <td style="text-align:left; font-weight:bold;">${escapeHTML(r.a)} ${isPair ? '&amp;' : 'vs'} ${escapeHTML(r.b)}</td>
+            <td>${r.g}</td>
+            ${isPair ? `<td style="color:#10b981;">${r.v}</td><td style="color:#ef4444;">${r.g - r.v}</td><td>${Math.round(rate(r) * 100)}%</td>`
+                     : `<td>${escapeHTML(r.a)} <b>${r.v}</b> – <b>${r.g - r.v}</b> ${escapeHTML(r.b)}</td>`}</tr>`).join('')}</tbody></table></div>`;
     }
 
     // --- สถิติสะสมรายคนข้ามหลายรอบ ---
@@ -2688,12 +2838,16 @@ function generateAllValidTeams(excludeList) {
         return out;
     }
 
-    function logSessionStats(id, date, ps) {
+    function logSessionStats(id, date, ps, mh) {
         const stats = statsFromPlayerStats(ps);
         if (Object.keys(stats).length === 0) return;
         const log = readStatsLog();
         if (log.some(x => x.id === id)) return;
-        log.push({ id, date, stats });
+        const entry = { id, date, stats }, P = {}, R = {};
+        addRelations(mh, P, R);
+        if (Object.keys(P).length) entry.pairs = P;
+        if (Object.keys(R).length) entry.rivals = R;
+        log.push(entry);
         try { localStorage.setItem(STATS_LOG_KEY, JSON.stringify(log)); } catch (e) {}
     }
 
@@ -2705,7 +2859,7 @@ function generateAllValidTeams(excludeList) {
             past.forEach(it => {
                 try {
                     const st = typeof it.snapshot === 'string' ? JSON.parse(it.snapshot) : it.snapshot;
-                    logSessionStats(it.id, it.date, st.playerStats);
+                    logSessionStats(it.id, it.date, st.playerStats, st.matchHistory);
                 } catch (e) {}
             });
         } catch (e) {}
@@ -2728,6 +2882,8 @@ function generateAllValidTeams(excludeList) {
     }
 
     function renderLeaderboard() {
+        renderLbTabs();
+        if (lbTab !== 'rank') { renderRelations(); return; }
         const tot = {};
         const add = (name, s) => {
             const t = tot[name] || (tot[name] = { name, w: 0, l: 0, sessions: 0 });
