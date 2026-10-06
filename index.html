@@ -359,8 +359,7 @@
     let startTimeCalculated = null;
     let globalMatchCounter = 0;
 
-    // จำนวนรอบสูงสุดที่เก็บในประวัติ (ใช้ค่าเดียวกันทั้ง index.html และ history.html)
-    const MAX_HISTORY = 3;
+    // ประวัติเก็บไม่จำกัดจำนวนรอบ จะลดลงก็ต่อเมื่อผู้ใช้กดลบเอง
 
     // ตรวจสอบ URL parameter: ?mode=single → จำกัดแชมป์ 1 สมัย
     const _urlParams = new URLSearchParams(window.location.search);
@@ -2611,17 +2610,28 @@ function generateAllValidTeams(excludeList) {
         }
     }
 
+    // คืนค่า true เมื่อบันทึกสำเร็จ (หรือไม่มีอะไรต้องบันทึก) และ false เมื่อพื้นที่เก็บข้อมูลเต็ม
     function archiveCurrentSession() {
-        if (players.length === 0 && matchHistory.length === 0) return; 
-        let currentState = createDeepSnapshot();
+        if (players.length === 0 && matchHistory.length === 0) return true; 
+        // เก็บเฉพาะข้อมูลที่หน้าประวัติใช้จริง (รายชื่อ สถิติรายคน ผลแต่ละแมตช์) เพื่อประหยัดพื้นที่ เก็บได้หลายรอบขึ้นมาก
+        let slimStats = {};
+        Object.keys(playerStats).forEach(n => {
+            let st = playerStats[n] || {};
+            slimStats[n] = { arrivalTime: st.arrivalTime, played: st.played, wins: st.wins, losses: st.losses };
+        });
+        let currentState = JSON.stringify({ players, playerStats: slimStats, matchHistory });
         let historyStr = localStorage.getItem('badminton_past_sessions');
         let historyList = historyStr ? JSON.parse(historyStr) : [];
         let dateStr = new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
         let sessionId = Date.now();
         historyList.unshift({ id: sessionId, date: dateStr, matchCount: matchHistory.length, playerCount: players.length, snapshot: currentState }); 
         logSessionStats(sessionId, dateStr, playerStats);
-        if (historyList.length > MAX_HISTORY) historyList = historyList.slice(0, MAX_HISTORY); 
-        localStorage.setItem('badminton_past_sessions', JSON.stringify(historyList));
+        try {
+            localStorage.setItem('badminton_past_sessions', JSON.stringify(historyList));
+        } catch (e) {
+            return false;
+        }
+        return true;
     }
 
     // --- สถิติสะสมรายคนข้ามหลายรอบ ---
@@ -2650,7 +2660,7 @@ function generateAllValidTeams(excludeList) {
         const log = readStatsLog();
         if (log.some(x => x.id === id)) return;
         log.push({ id, date, stats });
-        localStorage.setItem(STATS_LOG_KEY, JSON.stringify(log));
+        try { localStorage.setItem(STATS_LOG_KEY, JSON.stringify(log)); } catch (e) {}
     }
 
     // ดึงรอบเก่าที่อยู่ในประวัติแล้วมานับรวม ทำครั้งเดียวตอนเปิดใช้ฟีเจอร์นี้ครั้งแรก
@@ -2736,7 +2746,9 @@ function generateAllValidTeams(excludeList) {
 
     function hardReset() {
         if(confirm('คุณต้องการจบการแข่งขันประจำวันนี้ และล้างข้อมูลทั้งหมดใช่หรือไม่?\n(ข้อมูลรอบนี้จะถูกบันทึกในประวัติย้อนหลังอัตโนมัติ)')) { 
-            archiveCurrentSession();
+            if (!archiveCurrentSession()) {
+                if (!confirm('บันทึกประวัติรอบนี้ไม่สำเร็จ เพราะพื้นที่เก็บข้อมูลในเบราว์เซอร์เต็ม\nต้องการล้างข้อมูลต่อโดยไม่บันทึกหรือไม่?\n(กดยกเลิกเพื่อกลับไปลบประวัติเก่าก่อน)')) return;
+            }
             // [แก้ไข] ล้าง localStorage ด้วยเสมอ ไม่ใช่แค่ Firebase
             localStorage.removeItem('badminton_game_state');
             if(window.clearCloudData) {
@@ -2767,7 +2779,16 @@ function generateAllValidTeams(excludeList) {
             <div class="history-card" onclick="viewHistoryDetail(${item.id})">
                 <div class="history-info"><h4>รอบวันที่ ${escapeHTML(item.date)}</h4><p>👥 ผู้เล่นทั้งหมด: ${escapeHTML(item.playerCount)} คน | 🏸 ทั้งหมด: ${escapeHTML(item.matchCount)} แมตช์</p></div>
                 <div onclick="event.stopPropagation();"><button class="btn-delete-hist" onclick="deleteHistory(${item.id})">🗑️ ลบ</button></div>
-            </div>`).join('');
+            </div>`).join('') + historyUsageHtml(historyList.length);
+    }
+
+    // แสดงจำนวนรอบที่เก็บและพื้นที่เก็บข้อมูลที่ใช้ไป (เพดานโดยประมาณ ~5 ล้านตัวอักษร ต่างกันตามเบราว์เซอร์)
+    function historyUsageHtml(count) {
+        let used = 0;
+        try { Object.keys(localStorage).forEach(k => { used += k.length + (localStorage.getItem(k) || '').length; }); } catch (e) {}
+        let pct = Math.min(100, used / 5000000 * 100);
+        let warn = pct >= 80;
+        return `<div style="text-align:center; font-size:12px; margin-top:10px; color:${warn ? '#ef4444' : '#94a3b8'};">เก็บไว้ ${count} รอบ | ใช้พื้นที่เก็บข้อมูลในเบราว์เซอร์ประมาณ ${pct.toFixed(1)}%${warn ? ' (ใกล้เต็ม ควรลบรอบเก่า)' : ''}</div>`;
     }
 
     function deleteHistory(id) {

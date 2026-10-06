@@ -50,7 +50,7 @@
 <body>
     <div class="container">
         <div class="top-header">
-            <h1>📅 ประวัติการเล่นย้อนหลัง (3 รอบล่าสุด)</h1>
+            <h1>📅 ประวัติการเล่นย้อนหลัง</h1>
             <a href="index.html" class="btn-back">⬅ กลับหน้าหลัก</a>
         </div>
         
@@ -60,7 +60,7 @@
     <script>
         function renderHistoryList() {
             const historyStr = localStorage.getItem('badminton_past_sessions');
-            // จำนวนรอบที่แสดงถูกจำกัดไว้ตั้งแต่ตอนบันทึกแล้ว (MAX_HISTORY=3 ใน index.html) จึงแสดงทั้งหมดได้เลย
+            // ประวัติเก็บไม่จำกัดจำนวนรอบ (ลดลงเมื่อผู้ใช้กดลบเท่านั้น) จึงแสดงทั้งหมดได้เลย
             const historyList = historyStr ? JSON.parse(historyStr) : [];
             const container = document.getElementById('historyListContainer');
 
