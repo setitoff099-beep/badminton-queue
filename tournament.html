@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>โหมดทัวร์นาเมนต์แบดมินตัน</title>
+<style>
+:root{--primary:#3b82f6;--success:#10b981;--danger:#ef4444;--dark:#1e293b;--light:#f1f5f9;--warning:#f59e0b;--purple:#8b5cf6;--bg:#f8fafc;--card:#fff}
+*{box-sizing:border-box}
+body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:var(--bg);margin:0;padding:16px;color:var(--dark)}
+.wrap{max-width:960px;margin:0 auto}
+.card{background:var(--card);border-radius:16px;padding:20px;margin-bottom:16px;box-shadow:0 4px 15px rgba(0,0,0,.04)}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+h1{margin:0;font-size:22px} h2{margin:0 0 12px;font-size:17px}
+label{display:block;font-weight:bold;font-size:14px;margin:12px 0 6px}
+input,select,textarea{width:100%;padding:10px 12px;border:none;border-radius:8px;background:var(--light);font-size:15px;font-family:inherit}
+.btn{border:none;border-radius:8px;padding:10px 16px;font-weight:bold;font-size:14px;cursor:pointer;background:var(--dark);color:#fff;text-decoration:none;display:inline-block}
+.btn.p{background:var(--primary)} .btn.g{background:#e2e8f0;color:#334155} .btn.r{background:#fee2e2;color:var(--danger)}
+.btn.big{width:100%;margin-top:16px;padding:14px;font-size:16px}
+.hint{font-size:12px;color:#64748b;margin-top:4px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.courts{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+.court{background:#fff;border:2px solid #e2e8f0;border-radius:16px;padding:14px;position:relative;margin-top:8px}
+.court .ct{position:absolute;top:-12px;left:14px;background:var(--dark);color:#fff;padding:2px 12px;border-radius:14px;font-size:13px;font-weight:bold}
+.court .tm{position:absolute;top:-12px;right:14px;background:#e0f2fe;color:#0369a1;padding:2px 12px;border-radius:14px;font-size:13px;font-weight:bold;font-variant-numeric:tabular-nums}
+.tb{background:var(--light);border-radius:12px;padding:10px;text-align:center;cursor:pointer;margin-top:8px;user-select:none}
+.tb:active{background:#dbeafe}
+.tb .nm{font-weight:bold;font-size:14px;word-break:break-word}
+.tb .sc{font-size:38px;font-weight:bold;line-height:1.1}
+.tb .mn{border:none;background:#e2e8f0;border-radius:6px;font-size:12px;padding:3px 8px;cursor:pointer}
+.vs{text-align:center;font-size:12px;color:#94a3b8;margin-top:6px}
+.empty{color:#94a3b8;text-align:center;padding:30px 10px;font-size:14px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:9px 6px;text-align:center;border-bottom:1px solid #f1f5f9}
+th{background:var(--dark);color:#fff;font-weight:normal} td.l,th.l{text-align:left}
+.scroll{overflow-x:auto}
+.rd{font-weight:bold;font-size:13px;color:#475569;margin:12px 0 4px}
+.mrow{display:flex;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:8px;background:var(--light);margin-bottom:4px;font-size:14px}
+.mrow.playing{background:#dbeafe} .mrow.done{background:#f0fdf4}
+.bracket{display:flex;gap:18px;overflow-x:auto;padding-bottom:8px}
+.bcol{min-width:190px;display:flex;flex-direction:column;justify-content:space-around;gap:10px}
+.btitle{text-align:center;font-weight:bold;font-size:13px;color:#475569}
+.bm{border:2px solid #e2e8f0;border-radius:10px;overflow:hidden;background:#fff}
+.bm.playing{border-color:var(--primary)}
+.brow{display:flex;justify-content:space-between;gap:8px;padding:7px 10px;font-size:13px}
+.brow+.brow{border-top:1px solid #f1f5f9}
+.brow.win{background:#dcfce7;font-weight:bold}
+.champ{background:linear-gradient(135deg,#fef3c7,#fde68a);text-align:center;padding:22px;border-radius:16px;margin-bottom:16px}
+.champ b{font-size:26px;display:block;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>🏅 โหมดทัวร์นาเมนต์</h1>
+    <a href="index.html" class="btn">⬅ กลับหน้าหลัก</a>
+  </div>
+  <div id="app"></div>
+</div>
+
+<script>
+const KEY = 'badminton_tournament', HKEY = 'badminton_tournament_history';
+let T = null; // สถานะทัวร์นาเมนต์ทั้งหมด (เก็บใน localStorage)
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = ms => { const t = Math.max(0, Math.floor(ms / 1000)); return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
+const tn = i => (i === null || i === undefined) ? '-' : T.teams[i].name;
+const save = () => localStorage.setItem(KEY, JSON.stringify(T));
+function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+// ---------- สร้างทีม ----------
+// คู่: "เจ๋ง+จี" = ล็อกคู่, ชื่อเดี่ยวๆ = สุ่มจับคู่ให้ | เดี่ยว: 1 บรรทัด = 1 คน
+function parseTeams(text, doubles) {
+  const teams = [], pool = [];
+  text.split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
+    const parts = l.split('+').map(x => x.trim()).filter(Boolean);
+    if (!doubles) parts.forEach(p => teams.push(p));
+    else if (parts.length >= 2) teams.push(parts[0] + ' & ' + parts[1]);
+    else if (parts.length === 1) pool.push(parts[0]);
+  });
+  if (doubles) {
+    if (pool.length % 2) return { error: 'มีผู้เล่นเดี่ยวที่รอจับคู่เป็นเลขคี่ (' + pool.length + ' คน) กรุณาเพิ่มหรือลดอีก 1 คน หรือพิมพ์คู่ด้วย +' };
+    const sh = shuffle(pool);
+    for (let i = 0; i < sh.length; i += 2) teams.push(sh[i] + ' & ' + sh[i + 1]);
+  }
+  return { teams };
+}
+
+// ---------- สร้างตารางแข่ง ----------
+const mk = (round, pos, a, b) => ({ round, pos, a, b, sa: 0, sb: 0, status: 'pending', winner: null, bye: false, start: 0, end: 0 });
+
+function buildRR(n) { // วิธีหมุนวงกลม ทุกทีมเจอกันครั้งเดียว
+  let arr = [...Array(n).keys()]; if (n % 2) arr.push(null);
+  const m = arr.length, out = [];
+  for (let r = 0; r < m - 1; r++) {
+    for (let i = 0; i < m / 2; i++) { const a = arr[i], b = arr[m - 1 - i]; if (a !== null && b !== null) out.push(mk(r + 1, i, a, b)); }
+    arr = [arr[0], arr[m - 1], ...arr.slice(1, m - 1)];
+  }
+  return out;
+}
+
+function buildKO(n) { // สุ่มสาย ทีมที่เกินจากเลขยกกำลัง 2 ได้บาย
+  let S = 1; while (S < n) S *= 2;
+  const order = shuffle([...Array(n).keys()]); while (order.length < S) order.push(null);
+  const R = Math.log2(S), out = [];
+  for (let r = 1; r <= R; r++) for (let p = 0; p < S / Math.pow(2, r); p++) out.push(mk(r, p, null, null));
+  for (let p = 0; p < S / 2; p++) { const m = out.find(x => x.round === 1 && x.pos === p); m.a = order[p]; m.b = order[S - 1 - p]; }
+  return out;
+}
+
+function setWinner(m, w) {
+  m.winner = w; m.status = 'done';
+  if (T.format === 'ko') {
+    const nx = T.matches.find(x => x.round === m.round + 1 && x.pos === (m.pos >> 1));
+    if (nx) { if (m.pos % 2 === 0) nx.a = w; else nx.b = w; }
+  }
+}
+
+// ---------- จัดแมตช์ลงคอร์ท ----------
+const ready = m => m.status === 'pending' && m.a !== null && m.b !== null;
+function fill() {
+  const lastEnd = {}; T.matches.forEach(m => { if (m.status === 'done' && !m.bye) { lastEnd[m.a] = Math.max(lastEnd[m.a] || 0, m.end); lastEnd[m.b] = Math.max(lastEnd[m.b] || 0, m.end); } });
+  for (let c = 0; c < T.courts.length; c++) {
+    if (T.courts[c] !== null) continue;
+    const busy = new Set(); T.courts.forEach(id => { if (id !== null) { busy.add(T.matches[id].a); busy.add(T.matches[id].b); } });
+    let best = null, bestRest = Infinity;
+    T.matches.forEach(m => { // เลือกแมตช์ของทีมที่พักนานที่สุดก่อน
+      if (!ready(m) || busy.has(m.a) || busy.has(m.b)) return;
+      const rest = Math.max(lastEnd[m.a] || 0, lastEnd[m.b] || 0);
+      if (rest < bestRest) { best = m; bestRest = rest; }
+    });
+    if (best) { best.status = 'playing'; best.start = Date.now(); best.sa = 0; best.sb = 0; T.courts[c] = best.id; }
+  }
+}
+
+// ---------- ผลและอันดับ ----------
+function standings() {
+  const s = T.teams.map(t => ({ id: t.id, name: t.name, p: 0, w: 0, l: 0, pf: 0, pa: 0 }));
+  T.matches.filter(m => m.status === 'done' && !m.bye).forEach(m => {
+    const A = s[m.a], B = s[m.b]; A.p++; B.p++; A.pf += m.sa; A.pa += m.sb; B.pf += m.sb; B.pa += m.sa;
+    if (m.winner === m.a) { A.w++; B.l++; } else { B.w++; A.l++; }
+  });
+  return s.sort((x, y) => y.w - x.w || (y.pf - y.pa) - (x.pf - x.pa) || y.pf - x.pf);
+}
+function champion() {
+  if (T.format === 'rr') return standings()[0].name;
+  const fin = T.matches.reduce((a, b) => b.round > a.round ? b : a);
+  return tn(fin.winner);
+}
+function isComplete() {
+  if (T.format === 'rr') return T.matches.every(m => m.status === 'done');
+  const fin = T.matches.reduce((a, b) => b.round > a.round ? b : a);
+  return fin.status === 'done';
+}
+function archive() {
+  const h = JSON.parse(localStorage.getItem(HKEY) || '[]');
+  h.unshift({ date: new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }), format: T.format, doubles: T.doubles, teams: T.teams.length, champion: champion() });
+  localStorage.setItem(HKEY, JSON.stringify(h));
+}
+
+// ---------- การกระทำ ----------
+window.startT = function () {
+  const doubles = $('fType').value === 'd', format = $('fFormat').value;
+  const r = parseTeams($('fTeams').value, doubles);
+  if (r.error) return alert(r.error);
+  if (r.teams.length < 2) return alert('ต้องมีอย่างน้อย 2 ทีม');
+  if (new Set(r.teams.map(x => x.toLowerCase())).size !== r.teams.length) return alert('มีชื่อซ้ำกัน กรุณาตรวจรายชื่ออีกครั้ง');
+  const nCourts = Math.min(12, Math.max(1, parseInt($('fCourts').value) || 1));
+  T = { format, doubles, win: Math.max(1, parseInt($('fWin').value) || 21), teams: r.teams.map((n, i) => ({ id: i, name: n })),
+        matches: format === 'rr' ? buildRR(r.teams.length) : buildKO(r.teams.length), courts: Array(nCourts).fill(null), finished: false, undo: null };
+  T.matches.forEach((m, i) => m.id = i);
+  if (format === 'ko') T.matches.filter(m => m.round === 1 && (m.a === null || m.b === null)).forEach(m => { m.bye = true; setWinner(m, m.a === null ? m.b : m.a); });
+  fill(); save(); render();
+};
+window.score = function (c, side, d) {
+  const m = T.matches[T.courts[c]]; if (!m) return;
+  const before = d > 0 ? JSON.stringify({ matches: T.matches, courts: T.courts }) : null;
+  if (side === 'a') m.sa = Math.max(0, m.sa + d); else m.sb = Math.max(0, m.sb + d);
+  if (d > 0 && (m.sa >= T.win || m.sb >= T.win)) {
+    T.undo = before; m.end = Date.now();
+    setWinner(m, m.sa > m.sb ? m.a : m.b); T.courts[c] = null; fill();
+    if (!T.finished && isComplete()) { T.finished = true; archive(); }
+  }
+  save(); render();
+};
+window.undoLast = function () {
+  if (!T.undo || !confirm('ย้อนผลแมตช์ล่าสุดที่จบไปใช่หรือไม่?')) return;
+  const s = JSON.parse(T.undo); T.matches = s.matches; T.courts = s.courts; T.undo = null; T.finished = false;
+  save(); render();
+};
+window.resetT = function () {
+  if (!confirm('ต้องการเริ่มทัวร์นาเมนต์ใหม่ใช่หรือไม่? (ข้อมูลทัวร์นาเมนต์นี้จะถูกล้าง ผลที่จบแล้วยังอยู่ในรายการด้านล่างหน้าตั้งค่า)')) return;
+  T = null; localStorage.removeItem(KEY); render();
+};
+window.hint = function () {
+  $('hint').textContent = $('fType').value === 'd'
+    ? 'พิมพ์ เจ๋ง+จี = ล็อกคู่ให้ลงด้วยกัน | ชื่อเดี่ยวๆ ระบบสุ่มจับคู่ให้ (1 บรรทัดต่อ 1 คู่หรือ 1 คน)'
+    : '1 ชื่อต่อ 1 บรรทัด';
+};
+
+// ---------- หน้าจอ ----------
+function setupView() {
+  const h = JSON.parse(localStorage.getItem(HKEY) || '[]');
+  const past = h.length ? `<div class="card"><h2>🏆 ผลทัวร์นาเมนต์ที่ผ่านมา</h2>${h.slice(0, 8).map(x =>
+    `<div class="mrow"><span>${esc(x.date)} | ${x.format === 'rr' ? 'พบกันหมด' : 'แพ้คัดออก'} ${x.doubles ? 'คู่' : 'เดี่ยว'} ${esc(x.teams)} ทีม</span><b>🥇 ${esc(x.champion)}</b></div>`).join('')}</div>` : '';
+  return `<div class="card"><h2>ตั้งค่าทัวร์นาเมนต์</h2>
+    <div class="row2">
+      <div><label>รูปแบบการแข่ง</label><select id="fFormat"><option value="rr">พบกันหมด (Round Robin)</option><option value="ko">แพ้คัดออก (Knockout)</option></select></div>
+      <div><label>ประเภท</label><select id="fType" onchange="hint()"><option value="d">คู่ (Doubles)</option><option value="s">เดี่ยว (Singles)</option></select></div>
+      <div><label>จำนวนคอร์ท</label><input type="number" id="fCourts" value="2" min="1" max="12"></div>
+      <div><label>คะแนนชนะต่อเกม</label><input type="number" id="fWin" value="21" min="1"></div>
+    </div>
+    <label>รายชื่อผู้เข้าแข่งขัน</label>
+    <textarea id="fTeams" rows="9" placeholder="เจ๋ง+จี&#10;นนท์&#10;กาย&#10;ฟ้า+เบนซ์"></textarea>
+    <div class="hint" id="hint"></div>
+    <div class="hint">พบกันหมด: ทุกทีมเจอกันหมด เรียงอันดับตามชนะ → ผลต่างแต้ม → แต้มที่ทำได้ | แพ้คัดออก: สุ่มสาย ทีมที่เกินได้บาย</div>
+    <button class="btn p big" onclick="startT()">เริ่มทัวร์นาเมนต์</button></div>${past}`;
+}
+
+function courtHtml(c) {
+  const id = T.courts[c];
+  if (id === null) return `<div class="court"><div class="ct">Court ${c + 1}</div><div class="empty">${T.finished ? 'จบการแข่งขัน' : 'ว่าง (รอแมตช์ถัดไป)'}</div></div>`;
+  const m = T.matches[id];
+  const box = (side, t, s) => `<div class="tb" onclick="score(${c},'${side}',1)"><div class="nm">${esc(tn(t))}</div><div class="sc">${s}</div><button class="mn" onclick="event.stopPropagation();score(${c},'${side}',-1)">-1 ลดแต้ม</button></div>`;
+  return `<div class="court"><div class="ct">Court ${c + 1}</div><div class="tm" data-start="${m.start}">⏱ ${fmt(Date.now() - m.start)}</div>
+    ${box('a', m.a, m.sa)}<div class="vs">VS</div>${box('b', m.b, m.sb)}</div>`;
+}
+
+function standingsHtml() {
+  return `<div class="card"><h2>📊 ตารางคะแนน</h2><div class="scroll"><table><thead><tr><th>#</th><th class="l">ทีม</th><th>เล่น</th><th>ชนะ</th><th>แพ้</th><th>ได้</th><th>เสีย</th><th>ผลต่าง</th></tr></thead><tbody>${
+    standings().map((s, i) => `<tr><td>${['🥇', '🥈', '🥉'][i] || i + 1}</td><td class="l"><b>${esc(s.name)}</b></td><td>${s.p}</td><td style="color:#10b981">${s.w}</td><td style="color:#ef4444">${s.l}</td><td>${s.pf}</td><td>${s.pa}</td><td>${s.pf - s.pa}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+function scheduleHtml() {
+  let h = '<div class="card"><h2>📅 ตารางแข่งทั้งหมด</h2>', last = 0;
+  T.matches.forEach(m => {
+    if (m.round !== last) { last = m.round; h += `<div class="rd">รอบที่ ${m.round}</div>`; }
+    const res = m.status === 'done' ? `${m.sa}-${m.sb} (${fmt(m.end - m.start)})` : m.status === 'playing' ? '▶ กำลังแข่ง' : 'รอ';
+    h += `<div class="mrow ${m.status}"><span>${esc(tn(m.a))} vs ${esc(tn(m.b))}</span><b>${res}</b></div>`;
+  });
+  return h + '</div>';
+}
+
+function bracketHtml() {
+  const R = Math.max(...T.matches.map(m => m.round));
+  const box = m => {
+    const row = (t, s) => `<div class="brow ${m.status === 'done' && m.winner === t && t !== null ? 'win' : ''}"><span>${t === null ? (m.round === 1 ? 'บาย' : 'รอผู้ชนะ') : esc(tn(t))}</span><b>${m.status === 'pending' || m.bye ? '' : s}</b></div>`;
+    return `<div class="bm ${m.status}">${row(m.a, m.sa)}${row(m.b, m.sb)}</div>`;
+  };
+  let h = '<div class="card"><h2>🌳 สายการแข่งขัน</h2><div class="bracket">';
+  for (let r = 1; r <= R; r++) {
+    const label = r === R ? '🏆 ชิงชนะเลิศ' : r === R - 1 ? 'รอบรองชนะเลิศ' : `รอบ ${Math.pow(2, R - r + 1)} ทีม`;
+    h += `<div class="bcol"><div class="btitle">${label}</div>${T.matches.filter(m => m.round === r).sort((x, y) => x.pos - y.pos).map(box).join('')}</div>`;
+  }
+  return h + '</div></div>';
+}
+
+function playView() {
+  const done = T.matches.filter(m => m.status === 'done' && !m.bye).length, total = T.matches.filter(m => !m.bye).length;
+  const title = `${T.format === 'rr' ? 'พบกันหมด' : 'แพ้คัดออก'} | ${T.doubles ? 'คู่' : 'เดี่ยว'} | ${T.teams.length} ทีม | ชนะที่ ${T.win} แต้ม`;
+  return `${T.finished ? `<div class="champ">🏆 แชมป์<b>${esc(champion())}</b></div>` : ''}
+    <div class="card"><div class="top" style="margin:0"><div><h2 style="margin:0">${title}</h2><div class="hint">แข่งแล้ว ${done}/${total} แมตช์ | แตะที่ชื่อทีมเพื่อเพิ่มแต้ม</div></div>
+    <div>${T.undo ? '<button class="btn g" onclick="undoLast()">↩ ย้อนผลล่าสุด</button> ' : ''}<button class="btn r" onclick="resetT()">🗑 เริ่มใหม่</button></div></div></div>
+    <div class="card"><div class="courts">${T.courts.map((_, c) => courtHtml(c)).join('')}</div></div>
+    ${T.format === 'rr' ? standingsHtml() + scheduleHtml() : bracketHtml() + scheduleHtml()}`;
+}
+
+function render() { $('app').innerHTML = T ? playView() : setupView(); if (!T) hint(); }
+
+try { T = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { T = null; }
+render();
+setInterval(() => document.querySelectorAll('.tm').forEach(el => { el.textContent = '⏱ ' + fmt(Date.now() - Number(el.dataset.start)); }), 1000);
+</script>
+</body>
+</html>
