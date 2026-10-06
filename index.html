@@ -51,6 +51,9 @@
         .btn-pause { background: #f59e0b; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: bold; width: auto; margin: 0; }
         .btn-resume { background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 15px; cursor: pointer; font-weight: bold; width: auto; margin: 15px auto; display: block; }
         
+        .court-timer { position: absolute; top: -15px; right: 20px; background: #e0f2fe; color: #0369a1; padding: 4px 14px; border-radius: 20px; font-size: 13px; font-weight: bold; font-variant-numeric: tabular-nums; }
+        .court-timer:empty { display: none; }
+        .court-timer.done { background: #f1f5f9; color: #475569; }
         .court-paused { background: #f1f5f9; border-color: #cbd5e1; opacity: 0.85; }
         .court-paused .court-title { background: #64748b; }
         .paused-overlay { text-align: center; padding: 40px 20px; color: #475569; font-size: 15px; }
@@ -1828,8 +1831,10 @@ function generateAllValidTeams(excludeList) {
         let winText = req === 1 ? winner.p1 : (winner.p2 ? `${winner.p1}&${winner.p2}` : winner.p1);
         let loseText = req === 1 ? loser.p1 : (loser.p2 ? `${loser.p1}&${loser.p2}` : loser.p1);
 
+        court.timerEnd = Date.now();
         matchHistory.push({ 
             courtName: court.name, round: court.matchRound, 
+            duration: court.timerStart ? court.timerEnd - court.timerStart : null,
             result: `${winText} ชนะ ${loseText} [${court.scoreA}-${court.scoreB}] ${champStatus}` 
         });
         
@@ -2284,7 +2289,44 @@ function generateAllValidTeams(excludeList) {
             window.location.href = 'billing.html'; 
         }
 
+    // --- ตัวจับเวลาแต่ละคอร์ท (แสดงผลอย่างเดียว ไม่มีแจ้งเตือน) ---
+    // เก็บ timerStart/timerEnd/lastDuration ไว้ในอ็อบเจกต์ court จึงซิงก์ข้ามเครื่องและรอดการรีโหลด
+    // เริ่มนับเมื่อแมตช์ใหม่ (matchRound) มีผู้เล่นลงสนาม และหยุดนิ่งเมื่อแมตช์จบ
+    function syncCourtTimers() {
+        const now = Date.now();
+        courts.forEach(c => {
+            const active = !c.isPaused && c.teamA && c.teamB;
+            const key = active ? String(c.matchRound) : null;
+            if ((c.timerKey || null) === key) return;
+            if (c.timerEnd && c.timerStart) c.lastDuration = c.timerEnd - c.timerStart;
+            c.timerKey = key;
+            c.timerStart = key ? now : null;
+            c.timerEnd = null;
+        });
+    }
+
+    function fmtDuration(ms) {
+        const t = Math.max(0, Math.floor(ms / 1000));
+        const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+        const mm = String(m).padStart(2, '0'), ss = String(s).padStart(2, '0');
+        return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+    }
+
+    function updateCourtTimers() {
+        document.querySelectorAll('.court-timer').forEach(el => {
+            const c = courts[parseInt(el.dataset.i)];
+            if (!c || !c.timerStart) { el.textContent = ''; return; }
+            let txt = '⏱ ' + fmtDuration((c.timerEnd || Date.now()) - c.timerStart);
+            if (c.timerEnd) txt += ' (จบแล้ว)';
+            if (c.lastDuration) txt += ' | รอบก่อน ' + fmtDuration(c.lastDuration);
+            el.textContent = txt;
+            el.classList.toggle('done', !!c.timerEnd);
+        });
+    }
+    setInterval(updateCourtTimers, 1000);
+
     function renderAll() {
+        syncCourtTimers();
         let courtsHtml = '';
         courts.forEach((court, i) => {
             // เช็คสถานะพักคอร์ท
@@ -2353,6 +2395,7 @@ function generateAllValidTeams(excludeList) {
             courtsHtml += `
             <div class="court-wrapper">
                 <div class="court-title">${court.name}</div>
+                <div class="court-timer" data-i="${i}"></div>
                 <div class="match-board">
                     <div class="team-box protected-btn ${clsA}" onclick="addScore(${i}, 'A')">
                         <div class="player-names">${nameA}</div>
@@ -2372,6 +2415,7 @@ function generateAllValidTeams(excludeList) {
             </div>`;
         });
         document.getElementById('courtsContainer').innerHTML = courtsHtml;
+        updateCourtTimers();
 
         // แยกกลุ่มตามสถานะจริง (แสดงผลเท่านั้น ไม่กระทบลอจิกจัดคิว)
         //  - เขียว "รอลงสนาม": พักครบแล้ว พร้อมถูกเลือกในแมตช์ถัดไป
@@ -2423,12 +2467,12 @@ function generateAllValidTeams(excludeList) {
                 <div style="max-height: 250px; overflow-y: auto;">
                     <table style="margin-top: 0; border-radius: 0;">
                         <thead style="position: sticky; top: 0; background: #f1f5f9;">
-                            <tr><th style="width:20%; color:#475569;">รอบ</th><th style="color:#475569;">ผลการแข่งขัน</th></tr>
+                            <tr><th style="width:14%; color:#475569;">รอบ</th><th style="color:#475569;">ผลการแข่งขัน</th><th style="width:18%; color:#475569;">เวลา</th></tr>
                         </thead>
                         <tbody>
                             ${courtHistory.length > 0 
-                                ? courtHistory.map(h => `<tr><td>${h.round}</td><td style="text-align:left;">${h.result}</td></tr>`).join('') 
-                                : `<tr><td colspan="2" style="color:#94a3b8; padding: 15px;">ยังไม่มีข้อมูลการแข่งขัน</td></tr>`}
+                                ? courtHistory.map(h => `<tr><td>${h.round}</td><td style="text-align:left;">${h.result}</td><td style="white-space:nowrap;">${h.duration != null ? fmtDuration(h.duration) : '-'}</td></tr>`).join('') 
+                                : `<tr><td colspan="3" style="color:#94a3b8; padding: 15px;">ยังไม่มีข้อมูลการแข่งขัน</td></tr>`}
                         </tbody>
                     </table>
                 </div>
@@ -2620,7 +2664,7 @@ function generateAllValidTeams(excludeList) {
         }).join('') || 'ไม่มีรายชื่อผู้เล่น';
 
         // [แก้ไข] ใช้ escapeHTML() ป้องกัน XSS สำหรับชื่อคอร์ทและผลการแข่งขัน
-        let matchLinesHtml = (oldState.matchHistory || []).map(m => `<div style="padding:8px 0; border-bottom:1px dashed #cbd5e1; font-size:13.5px; color:#334155;"><strong>[${escapeHTML(m.courtName || 'Court')}]</strong> รอบที่ ${escapeHTML(m.round)}: ${escapeHTML(m.result)}</div>`).join('') || '<div style="color:#94a3b8; padding:10px 0;">ไม่มีประวัติการบันทึกแมตช์การแข่งขัน</div>';
+        let matchLinesHtml = (oldState.matchHistory || []).map(m => `<div style="padding:8px 0; border-bottom:1px dashed #cbd5e1; font-size:13.5px; color:#334155;"><strong>[${escapeHTML(m.courtName || 'Court')}]</strong> รอบที่ ${escapeHTML(m.round)}: ${escapeHTML(m.result)}${m.duration != null ? ` <span style=\"color:#0369a1; white-space:nowrap;\">⏱ ${fmtDuration(m.duration)}</span>` : ''}</div>`).join('') || '<div style="color:#94a3b8; padding:10px 0;">ไม่มีประวัติการบันทึกแมตช์การแข่งขัน</div>';
 
         document.getElementById('historyDetailContent').innerHTML = `
             <div class="detail-section"><h5>👥 รายชื่อผู้เล่น & สถิติภาพรวม</h5><div style="display:flex; flex-wrap:wrap; margin-top:5px;">${pListHtml}</div></div>
