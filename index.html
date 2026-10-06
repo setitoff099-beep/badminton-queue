@@ -157,6 +157,7 @@
         <button onclick="startTournament()">เริ่มแข่งขัน</button>
         <button class="btn-secondary" style="background: #cbd5e1; color: #334155;" onclick="clearSavedData()">ลบข้อมูลในระบบ (เริ่มใหม่ทั้งหมด)</button>
         <button class="btn-secondary" style="background: #e2e8f0; color: #334155; margin-top: 10px;" onclick="showHistory()">📅 ดูประวัติการเล่นย้อนหลัง</button>
+        <button class="btn-secondary" style="background: #ede9fe; color: #5b21b6; margin-top: 10px;" onclick="showLeaderboard()">🏆 ตารางอันดับสะสม</button>
     </div>
 
     <div id="gameSection" class="game-section">
@@ -174,6 +175,9 @@
                 </button>
                 <button class="protected-btn" onclick="goToBilling()" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; outline: none; font-weight: bold; font-family: inherit; cursor: pointer; transition: 0.3s; color: white; background: var(--teal); width: auto; font-size: 14px;">
                     💸 คิดเงิน
+                </button>
+                <button onclick="showLeaderboard()" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; outline: none; font-weight: bold; font-family: inherit; cursor: pointer; color: white; background: var(--purple); width: auto; font-size: 14px;">
+                    🏆 อันดับสะสม
                 </button>
                 <button class="btn-export protected-btn" onclick="exportSummary()">📷 บันทึกสรุปผล</button>
                 <button class="btn-reset protected-btn" onclick="hardReset()">จบการแข่งขัน & ล้างข้อมูล</button>
@@ -270,6 +274,21 @@
         </thead>
         <tbody></tbody>
     </table>
+</div>
+
+<div id="leaderboardModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 700px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h2 style="margin:0; color:var(--dark);">🏆 ตารางอันดับสะสม</h2>
+            <button onclick="closeLeaderboard()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#94a3b8; width:auto; padding:0; margin:0;">✖</button>
+        </div>
+        <div id="lbSortBar" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;"></div>
+        <div id="leaderboardContainer"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:15px; flex-wrap:wrap;">
+            <span style="font-size:12px; color:#94a3b8;">รวมทุกรอบที่จบแล้วและรอบที่กำลังเล่น (เก็บในเครื่องนี้) | อันดับ % ชนะนับเฉพาะคนที่เล่นอย่างน้อย 5 เกม</span>
+            <button onclick="clearStatsLog()" style="background:#fee2e2; color:#ef4444; border:none; padding:8px 14px; border-radius:8px; font-weight:bold; cursor:pointer; width:auto; margin:0; font-size:13px;">🗑️ ล้างสถิติสะสม</button>
+        </div>
+    </div>
 </div>
 
 <div id="historyModal" class="modal-overlay">
@@ -2598,9 +2617,121 @@ function generateAllValidTeams(excludeList) {
         let historyStr = localStorage.getItem('badminton_past_sessions');
         let historyList = historyStr ? JSON.parse(historyStr) : [];
         let dateStr = new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
-        historyList.unshift({ id: Date.now(), date: dateStr, matchCount: matchHistory.length, playerCount: players.length, snapshot: currentState }); 
+        let sessionId = Date.now();
+        historyList.unshift({ id: sessionId, date: dateStr, matchCount: matchHistory.length, playerCount: players.length, snapshot: currentState }); 
+        logSessionStats(sessionId, dateStr, playerStats);
         if (historyList.length > MAX_HISTORY) historyList = historyList.slice(0, MAX_HISTORY); 
         localStorage.setItem('badminton_past_sessions', JSON.stringify(historyList));
+    }
+
+    // --- สถิติสะสมรายคนข้ามหลายรอบ ---
+    // เก็บแยกจากประวัติ (ซึ่งจำกัด 3 รอบ) จึงไม่หายเมื่อประวัติเก่าถูกตัดทิ้งหรือลบ
+    // ใช้ ชนะ+แพ้ เป็นจำนวนเกมที่เล่น เพราะ playedของผู้เล่นที่เพิ่มกลางเกมถูกตั้งค่าตั้งต้นไว้เพื่อจัดคิว ไม่ใช่เกมที่เล่นจริง
+    const STATS_LOG_KEY = 'badminton_stats_log';
+    const LB_MIN_GAMES = 5;
+    let lbSort = 'wins';
+
+    function readStatsLog() {
+        try { return JSON.parse(localStorage.getItem(STATS_LOG_KEY) || '[]') || []; } catch (e) { return []; }
+    }
+
+    function statsFromPlayerStats(ps) {
+        const out = {};
+        Object.keys(ps || {}).forEach(n => {
+            const w = ps[n].wins || 0, l = ps[n].losses || 0;
+            if (w + l > 0) out[String(n).trim()] = { w, l };
+        });
+        return out;
+    }
+
+    function logSessionStats(id, date, ps) {
+        const stats = statsFromPlayerStats(ps);
+        if (Object.keys(stats).length === 0) return;
+        const log = readStatsLog();
+        if (log.some(x => x.id === id)) return;
+        log.push({ id, date, stats });
+        localStorage.setItem(STATS_LOG_KEY, JSON.stringify(log));
+    }
+
+    // ดึงรอบเก่าที่อยู่ในประวัติแล้วมานับรวม ทำครั้งเดียวตอนเปิดใช้ฟีเจอร์นี้ครั้งแรก
+    function backfillStatsLog() {
+        if (localStorage.getItem('badminton_stats_backfilled')) return;
+        try {
+            const past = JSON.parse(localStorage.getItem('badminton_past_sessions') || '[]');
+            past.forEach(it => {
+                try {
+                    const st = typeof it.snapshot === 'string' ? JSON.parse(it.snapshot) : it.snapshot;
+                    logSessionStats(it.id, it.date, st.playerStats);
+                } catch (e) {}
+            });
+        } catch (e) {}
+        localStorage.setItem('badminton_stats_backfilled', '1');
+    }
+
+    function showLeaderboard() {
+        backfillStatsLog();
+        renderLeaderboard();
+        document.getElementById('leaderboardModal').style.display = 'flex';
+    }
+    function closeLeaderboard() { document.getElementById('leaderboardModal').style.display = 'none'; }
+    function setLbSort(mode) { lbSort = mode; renderLeaderboard(); }
+
+    function clearStatsLog() {
+        if (!confirm('ต้องการล้างสถิติสะสมของทุกคนใช่หรือไม่?\n(ประวัติการเล่นย้อนหลังไม่ถูกลบ)')) return;
+        localStorage.setItem(STATS_LOG_KEY, '[]');
+        localStorage.setItem('badminton_stats_backfilled', '1');
+        renderLeaderboard();
+    }
+
+    function renderLeaderboard() {
+        const tot = {};
+        const add = (name, s) => {
+            const t = tot[name] || (tot[name] = { name, w: 0, l: 0, sessions: 0 });
+            t.w += s.w; t.l += s.l; t.sessions++;
+        };
+        readStatsLog().forEach(sess => Object.keys(sess.stats || {}).forEach(n => add(n, sess.stats[n])));
+        if (players.length > 0 && matchHistory.length > 0) {
+            const live = statsFromPlayerStats(playerStats);
+            Object.keys(live).forEach(n => add(n, live[n]));
+        }
+
+        let rows = Object.values(tot).map(t => {
+            const g = t.w + t.l;
+            return { ...t, g, rate: g > 0 ? (t.w / g) * 100 : 0, ok: g >= LB_MIN_GAMES };
+        });
+        const byWins = (a, b) => b.w - a.w || b.rate - a.rate || a.l - b.l;
+        if (lbSort === 'rate') rows.sort((a, b) => (b.ok - a.ok) || b.rate - a.rate || b.w - a.w);
+        else if (lbSort === 'games') rows.sort((a, b) => b.g - a.g || b.w - a.w);
+        else rows.sort(byWins);
+
+        const modes = [['wins', 'ชนะมากสุด'], ['rate', '% ชนะ'], ['games', 'เล่นมากสุด']];
+        document.getElementById('lbSortBar').innerHTML = modes.map(([k, label]) =>
+            `<button onclick="setLbSort('${k}')" style="width:auto; margin:0; padding:7px 14px; border-radius:8px; border:none; font-weight:bold; font-size:13px; cursor:pointer; background:${lbSort === k ? 'var(--purple)' : '#e2e8f0'}; color:${lbSort === k ? '#fff' : '#334155'};">${label}</button>`
+        ).join('');
+
+        const container = document.getElementById('leaderboardContainer');
+        if (rows.length === 0) {
+            container.innerHTML = `<div style="text-align:center; padding:30px; color:#94a3b8; background:#f8fafc; border-radius:12px;">ยังไม่มีสถิติสะสม สถิติจะเริ่มนับเมื่อกด "จบการแข่งขัน & ล้างข้อมูล" ในแต่ละรอบ</div>`;
+            return;
+        }
+        const medal = ['🥇', '🥈', '🥉'];
+        container.innerHTML = `
+            <div style="overflow-x:auto;"><table>
+                <thead><tr><th>อันดับ</th><th style="text-align:left;">ชื่อ</th><th>เล่น</th><th>ชนะ</th><th>แพ้</th><th>% ชนะ</th><th>มา (รอบ)</th></tr></thead>
+                <tbody>${rows.map((r, i) => {
+                    const ranked = !(lbSort === 'rate' && !r.ok);
+                    const rank = ranked ? (medal[i] || (i + 1)) : '-';
+                    return `<tr style="${ranked ? '' : 'color:#94a3b8;'}">
+                        <td>${rank}</td>
+                        <td style="text-align:left; font-weight:bold;">${escapeHTML(r.name)}</td>
+                        <td>${r.g}</td>
+                        <td style="color:#10b981;">${r.w}</td>
+                        <td style="color:#ef4444;">${r.l}</td>
+                        <td>${Math.round(r.rate)}%</td>
+                        <td>${r.sessions}</td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table></div>`;
     }
 
     function hardReset() {
