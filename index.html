@@ -146,6 +146,18 @@
                     </label>
                     <textarea id="playerInput" rows="8" placeholder="เจ๋ง+จี&#10;นนท์นี่&#10;กาย&#10;ฟ้า+เบนซ์&#10;ป๊อบ&#10;อาร์ท"></textarea>
         <div style="font-size:12px; color:#64748b; margin:6px 0 0;">ระบุระดับฝีมือได้โดยพิมพ์ต่อท้ายชื่อ เช่น <b>เจ๋ง:A</b> หรือ <b>เจ๋ง:A+จี:C</b> (A=มือแข็ง, B=ปานกลาง, C=มือใหม่) ถ้าไม่ระบุถือเป็น B และระบบจำระดับไว้ใช้รอบหน้า</div>
+        <div style="margin-top:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                <b style="font-size:14px;">👥 รายชื่อประจำ <span id="rosterCount" style="font-weight:normal; color:#64748b; font-size:12px;"></span></b>
+                <span style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button type="button" onclick="rosterSelectAll()" style="width:auto; margin:0; padding:6px 12px; border:none; border-radius:8px; background:#dbeafe; color:#1d4ed8; font-weight:bold; font-size:13px; cursor:pointer;">เลือกทั้งหมด</button>
+                    <button type="button" onclick="rosterClearBox()" style="width:auto; margin:0; padding:6px 12px; border:none; border-radius:8px; background:#e2e8f0; color:#334155; font-weight:bold; font-size:13px; cursor:pointer;">ล้างช่อง</button>
+                    <button type="button" id="rosterManageBtn" onclick="toggleRosterManage()" style="width:auto; margin:0; padding:6px 12px; border:none; border-radius:8px; background:#e2e8f0; color:#334155; font-weight:bold; font-size:13px; cursor:pointer;">✏️ จัดการ</button>
+                </span>
+            </div>
+            <div id="rosterList" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+            <div style="font-size:12px; color:#94a3b8; margin-top:6px;">แตะชื่อเพื่อเพิ่ม/เอาออกจากรอบนี้ ระบบจำชื่อให้อัตโนมัติเมื่อกดเริ่มแข่งขัน (เก็บในเครื่องนี้)</div>
+        </div>
                 </div>
         <div class="form-group">
             <label>3. คะแนนชนะในแต่ละเกม (เริ่มต้น):</label>
@@ -179,6 +191,9 @@
                 <button class="protected-btn" onclick="goToBilling()" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; outline: none; font-weight: bold; font-family: inherit; cursor: pointer; transition: 0.3s; color: white; background: var(--teal); width: auto; font-size: 14px;">
                     💸 คิดเงิน
                 </button>
+                <button onclick="showFairness()" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; outline: none; font-weight: bold; font-family: inherit; cursor: pointer; color: white; background: var(--teal); width: auto; font-size: 14px;">
+                    📊 ความเป็นธรรมคิว
+                </button>
                 <button class="protected-btn" onclick="showLevels()" style="margin: 0; padding: 8px 15px; border-radius: 8px; border: none; outline: none; font-weight: bold; font-family: inherit; cursor: pointer; color: white; background: var(--warning); width: auto; font-size: 14px;">
                     🎚 ระดับฝีมือ
                 </button>
@@ -200,6 +215,10 @@
                 <div class="action-flex">
                     <input type="text" id="newPlayerInput" class="protected-btn" placeholder="พิมพ์ชื่อผู้เล่นมาใหม่...">
                     <button style="background: #0ea5e9;" class="protected-btn" onclick="addNewPlayer()">เพิ่มผู้เล่น</button>
+                </div>
+                <div class="action-flex">
+                    <select id="rosterAddSelect" class="protected-btn"><option value="">-- เลือกจากรายชื่อประจำ --</option></select>
+                    <button style="background: #10b981;" class="protected-btn" onclick="addFromRoster()">เพิ่มจากรายชื่อ</button>
                 </div>
                 <div class="action-flex" style="margin-bottom: 0;">
                     <select id="removePlayerSelect" class="protected-btn"><option value="">-- เลือกผู้เล่นที่จะลบ --</option></select>
@@ -280,6 +299,17 @@
         </thead>
         <tbody></tbody>
     </table>
+</div>
+
+<div id="fairnessModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 720px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h2 style="margin:0; color:var(--dark);">📊 ความเป็นธรรมของคิว</h2>
+            <button onclick="closeFairness()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#94a3b8; width:auto; padding:0; margin:0;">✖</button>
+        </div>
+        <div id="fairnessContainer"></div>
+        <div style="font-size:12px; color:#94a3b8; margin-top:12px;">คำนวณจากเวลามาถึงที่บันทึกไว้ เวลารอ = เวลาที่อยู่ ลบเวลาที่ลงสนาม (แมตช์ที่เล่นก่อนอัปเดตไม่มีข้อมูลเวลา) คนที่กด 🛌 พักและคนที่มาไม่ถึง 20 นาทีไม่นับในค่าเฉลี่ย</div>
+    </div>
 </div>
 
 <div id="levelModal" class="modal-overlay">
@@ -363,6 +393,7 @@
     let shuttleClosedTotal = 0; // ลูกแบดของคอร์ดที่ถูกปิดกลางเกม (เก็บรวมไว้ไม่ให้หาย)
     // ระดับฝีมือ: A=มือแข็ง B=ปานกลาง(ค่าเริ่มต้น) C=มือใหม่ ใช้แบ่งทีมให้สมดุลเท่านั้น ไม่มีผลต่อลำดับคิว
     let playerLevels = {};
+    let gameId = null; // รหัสของเกมนี้ ใช้บอกเครื่องอื่นว่าเกมไหนถูกจบไปแล้ว
     let levelStrength = parseFloat(localStorage.getItem('badminton_level_strength') || '1'); // 0=ปิด 0.5=เบา 1=ปกติ 2=เข้ม
     const LEVEL_VAL = { A: 3, B: 2, C: 1 };
     const LEVEL_SPLIT_W = 8; // โทษต่อ 1 ระดับที่ทั้งสองทีมต่างกัน (ตอนแบ่ง 4 คนเป็น 2 ทีม)
@@ -707,6 +738,8 @@
             startTimeCalculated = `${h}:${calcM}`;
             
             initFreshData(); // ฟังก์ชันนี้จะเคลียร์ค่า lockedPairs เราจึงต้องเซ็ตค่าใหม่ด้านล่าง
+            gameId = Date.now();
+            touchRoster(players, true); // จำรายชื่อไว้ใช้รอบหน้า
             {   // ใช้ระดับที่พิมพ์มา หรือระดับที่จำไว้จากรอบก่อน
                 let savedLv = loadSavedLevels();
                 players.forEach(p => {
@@ -2295,6 +2328,7 @@ function generateAllValidTeams(excludeList) {
         players.forEach(p => { if(p !== name) { if(!opponentHistory[p]) opponentHistory[p] = {}; opponentHistory[p][name] = opponentHistory[p][name] || 0; opponentHistory[name][p] = opponentHistory[name][p] || 0; } });
 
         { let sl = loadSavedLevels(); if (sl[name]) playerLevels[name] = sl[name]; }
+        touchRoster([name], false);
         eliminatedOrder.push(name); 
         document.getElementById('newPlayerInput').value = '';
         renderAll(); saveData();
@@ -2597,6 +2631,15 @@ function generateAllValidTeams(excludeList) {
 
         let optionsHtml = players.map(p => `<option value="${p}">${p}</option>`).join('');
         document.getElementById('removePlayerSelect').innerHTML = `<option value="">-- เลือกผู้เล่น --</option>` + optionsHtml;
+        {   // รายชื่อประจำที่ยังไม่อยู่ในเกม (มาทีหลัง หรือถูกลบออกไปก่อนหน้า)
+            let rs = document.getElementById('rosterAddSelect');
+            if (rs) {
+                let cur = rs.value, inGame = new Set(players);
+                rosterAvail = sortedRoster().filter(x => !inGame.has(x.n));
+                rs.innerHTML = `<option value="">-- เลือกจากรายชื่อประจำ (${rosterAvail.length} คน) --</option>` + rosterAvail.map((x, i) => `<option value="${i}">${escapeHTML(x.n)}</option>`).join('');
+                if (cur !== '' && rosterAvail[parseInt(cur)]) rs.value = cur;
+            }
+        }
         document.getElementById('lockP1').innerHTML = `<option value="">-- คนที่ 1 --</option>` + optionsHtml;
         document.getElementById('lockP2').innerHTML = `<option value="">-- คนที่ 2 --</option>` + optionsHtml;
 
@@ -2646,7 +2689,7 @@ function generateAllValidTeams(excludeList) {
                 players, mainQueue, historyPairs, opponentHistory, recentPairs, recentOpponents, eliminatedOrder, 
                 matchHistory, playerStats, lockedPairs, numCourts, 
                 winScore, maxChamps, courts: cleanCourts,
-                startTimeExact, startTimeCalculated, globalMatchCounter, shuttleClosedTotal, playerLevels, levelStrength
+                startTimeExact, startTimeCalculated, globalMatchCounter, shuttleClosedTotal, playerLevels, levelStrength, gameId
             });
         }
 
@@ -2669,6 +2712,7 @@ function generateAllValidTeams(excludeList) {
             globalMatchCounter = st.globalMatchCounter || 0;
             shuttleClosedTotal = st.shuttleClosedTotal || 0;
             playerLevels = st.playerLevels || {};
+            gameId = st.gameId || null;
             if (st.levelStrength !== undefined) levelStrength = st.levelStrength;
             
             // 🔥 จุดสำคัญ: แอบเก็บข้อมูลคอร์ทที่มีปุ่มย้อนผลของเครื่องตัวเองเอาไว้ก่อนโดน Firebase ทับ
@@ -2705,7 +2749,7 @@ function generateAllValidTeams(excludeList) {
         if(confirm('ต้องการล้างข้อมูลเพื่อเริ่มตั้งค่าใหม่ทั้งหมดใช่หรือไม่? (ข้อมูลจะถูกลบในทุกเครื่อง)')) {
             // [แก้ไข] ล้าง localStorage ด้วยเสมอ ไม่ใช่แค่ Firebase
             localStorage.removeItem('badminton_game_state');
-            if(window.clearCloudData) window.clearCloudData(); 
+            if(window.clearCloudData) window.clearCloudData(gameId, 'discard'); 
             else window.location.href = 'index.html';
         }
     }
@@ -2732,6 +2776,181 @@ function generateAllValidTeams(excludeList) {
             return false;
         }
         return true;
+    }
+
+    // --- เมื่อเครื่องอื่นกดจบ/ล้างเกม ---
+    window.hasActiveGame = () => players.length > 0 || matchHistory.length > 0 || !!localStorage.getItem('badminton_game_state');
+    window.handleRemoteReset = function(kind) {
+        if (window._remoteResetting) return;
+        window._remoteResetting = true;
+        // จบการแข่งขัน = บันทึกรอบนี้ลงประวัติของเครื่องนี้ด้วย | ล้างทิ้ง (discard) = ไม่บันทึก
+        try { if (kind !== 'discard' && (players.length > 0 || matchHistory.length > 0)) archiveCurrentSession(); } catch (e) {}
+        localStorage.removeItem('badminton_game_state');
+        alert(kind === 'discard' ? 'อีกเครื่องล้างข้อมูลเกมแล้ว ระบบจะกลับไปหน้าตั้งค่า'
+                                 : 'อีกเครื่องกดจบการแข่งขันแล้ว ระบบบันทึกรอบนี้ลงประวัติของเครื่องนี้ และกลับไปหน้าตั้งค่า');
+        window.location.href = 'index.html';
+    };
+    window.showSyncWarning = function(msg) {
+        let box = document.getElementById('syncWarn');
+        if (!box) {
+            box = document.createElement('div'); box.id = 'syncWarn';
+            box.style.cssText = 'position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:9999; width:420px; max-width:92vw; background:#fffbeb; color:#92400e; border:2px solid #f59e0b; border-radius:12px; padding:12px 16px; box-shadow:0 8px 30px rgba(0,0,0,.2); font-size:14px; cursor:pointer;';
+            box.onclick = () => box.remove();
+            document.body.appendChild(box);
+        }
+        box.textContent = '⚠️ ' + msg + ' (แตะเพื่อปิด)';
+        clearTimeout(box._t); box._t = setTimeout(() => box.remove(), 12000);
+    };
+
+    // --- ระบบจำผู้เล่นประจำ ---
+    const ROSTER_KEY = 'badminton_roster';
+    let rosterManage = false;
+    let rosterAvail = []; // ตัวเลือกในช่อง "เลือกจากรายชื่อประจำ" ระหว่างเกม (อ้างด้วยลำดับ ไม่ใช้ชื่อใน attribute)
+    function loadRoster() { try { const r = JSON.parse(localStorage.getItem(ROSTER_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch (e) { return []; } }
+    function sortedRoster() { return loadRoster().sort((a, b) => (b.t || 0) - (a.t || 0) || String(a.n).localeCompare(String(b.n))); }
+    function saveRosterList(list) { try { localStorage.setItem(ROSTER_KEY, JSON.stringify(list)); } catch (e) {} }
+    // bump=true นับเป็นมาเล่น 1 รอบ (ตอนเริ่มเกม) | false แค่เพิ่มชื่อ/อัปเดตเวลา (ตอนเพิ่มกลางเกม)
+    function touchRoster(names, bump) {
+        const list = loadRoster(), now = Date.now();
+        names.forEach(n => {
+            n = String(n).trim(); if (!n) return;
+            const e = list.find(x => x.n === n);
+            if (e) { if (bump) e.c = (e.c || 0) + 1; e.t = now; } else list.push({ n, c: 1, t: now });
+        });
+        saveRosterList(list);
+    }
+    const rosterNameOf = tok => tok.trim().replace(/\s*[:：]\s*[ABCabc]$/, '').trim();
+    function textareaNames() {
+        const set = new Set();
+        document.getElementById('playerInput').value.split('\n').forEach(line => line.split('+').forEach(tok => { const n = rosterNameOf(tok); if (n) set.add(n); }));
+        return set;
+    }
+    window.renderRoster = function() {
+        const box = document.getElementById('rosterList'); if (!box) return;
+        const list = sortedRoster(), sel = textareaNames();
+        document.getElementById('rosterCount').textContent = list.length ? `(${list.length} คน | เลือกแล้ว ${list.filter(x => sel.has(x.n)).length})` : '';
+        document.getElementById('rosterManageBtn').textContent = rosterManage ? '✔ เสร็จ' : '✏️ จัดการ';
+        if (!list.length) { box.innerHTML = '<span style="color:#94a3b8; font-size:13px;">ยังไม่มีรายชื่อที่จำไว้ ระบบจะจำชื่อให้อัตโนมัติเมื่อกดเริ่มแข่งขัน</span>'; return; }
+        box.innerHTML = list.map((x, i) => {
+            const on = sel.has(x.n);
+            const bg = rosterManage ? '#fee2e2' : on ? 'var(--primary)' : '#e2e8f0', fg = rosterManage ? '#b91c1c' : on ? '#fff' : '#334155';
+            return `<span onclick="rosterTap(${i})" style="cursor:pointer; user-select:none; padding:6px 12px; border-radius:16px; font-size:14px; background:${bg}; color:${fg};">${escapeHTML(x.n)}${rosterManage ? ' ✕' : ''}</span>`;
+        }).join('');
+    };
+    window.rosterTap = function(i) {
+        const x = sortedRoster()[i]; if (!x) return;
+        if (rosterManage) {
+            if (!confirm(`ลบ "${x.n}" ออกจากรายชื่อประจำใช่หรือไม่?`)) return;
+            saveRosterList(loadRoster().filter(r => r.n !== x.n)); renderRoster(); return;
+        }
+        const ta = document.getElementById('playerInput'), lines = ta.value.split('\n');
+        const idx = lines.findIndex(l => !l.includes('+') && rosterNameOf(l) === x.n);
+        if (idx >= 0) lines.splice(idx, 1);
+        else if (lines.some(l => l.split('+').some(t => rosterNameOf(t) === x.n))) { alert('ชื่อนี้อยู่ในคู่ล็อก (มีเครื่องหมาย +) กรุณาแก้ในช่องรายชื่อโดยตรง'); return; }
+        else if (lines.length && lines[lines.length - 1].trim() === '') lines[lines.length - 1] = x.n;
+        else lines.push(x.n);
+        ta.value = lines.join('\n').replace(/^\n+/, '');
+        renderRoster();
+    };
+    window.rosterSelectAll = function() {
+        const ta = document.getElementById('playerInput'), have = textareaNames();
+        const add = sortedRoster().map(x => x.n).filter(n => !have.has(n));
+        if (add.length) ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n' : '') + add.join('\n');
+        renderRoster();
+    };
+    window.rosterClearBox = function() {
+        const ta = document.getElementById('playerInput');
+        if (ta.value.trim() && !confirm('ล้างรายชื่อในช่องกรอกทั้งหมดใช่หรือไม่? (รายชื่อประจำที่จำไว้ไม่ถูกลบ)')) return;
+        ta.value = ''; renderRoster();
+    };
+    window.toggleRosterManage = function() { rosterManage = !rosterManage; renderRoster(); };
+    // เพิ่มคนที่เคยมาแล้วแต่มาทีหลัง: เวลามาถึงนับจากตอนนี้ และได้ระดับฝีมือเดิมที่จำไว้
+    window.addFromRoster = function() {
+        let x = rosterAvail[parseInt(document.getElementById('rosterAddSelect').value)];
+        if (!x) return alert('กรุณาเลือกชื่อจากรายชื่อประจำก่อนครับ');
+        document.getElementById('newPlayerInput').value = x.n;
+        addNewPlayer();
+    };
+    // ครั้งแรกที่เปิดฟีเจอร์นี้ ดึงชื่อจากประวัติ/สถิติสะสมที่มีอยู่แล้วมาเป็นรายชื่อประจำ
+    function seedRosterOnce() {
+        if (localStorage.getItem('badminton_roster_seeded')) return;
+        const sessions = {}; // id -> { ts, names }
+        const add = (id, names) => { const e = sessions[id] || (sessions[id] = { ts: Number(id) || 0, names: new Set() }); names.forEach(n => { n = String(n).trim(); if (n) e.names.add(n); }); };
+        try { JSON.parse(localStorage.getItem('badminton_stats_log') || '[]').forEach(en => add(en.id, Object.keys(en.stats || {}))); } catch (e) {}
+        try { JSON.parse(localStorage.getItem('badminton_past_sessions') || '[]').forEach(it => {
+            try { const st = typeof it.snapshot === 'string' ? JSON.parse(it.snapshot) : it.snapshot; add(it.id, st.players || []); } catch (e) {}
+        }); } catch (e) {}
+        const list = loadRoster();
+        Object.values(sessions).forEach(se => se.names.forEach(n => {
+            const e = list.find(x => x.n === n);
+            if (e) { e.c = (e.c || 0) + 1; e.t = Math.max(e.t || 0, se.ts); } else list.push({ n, c: 1, t: se.ts });
+        }));
+        saveRosterList(list);
+        try { localStorage.setItem('badminton_roster_seeded', '1'); } catch (e) {}
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+        const ta = document.getElementById('playerInput');
+        if (ta) ta.addEventListener('input', renderRoster);
+        try { seedRosterOnce(); } catch (e) {}
+        setTimeout(() => { renderRoster(); if (typeof renderAll === 'function' && players.length > 0) renderAll(); }, 0); // หลัง handler อื่นกู้ค่าเสร็จแล้ว
+    });
+
+    // --- สรุปความเป็นธรรมของคิว ---
+    window.showFairness = function() { renderFairness(); document.getElementById('fairnessModal').style.display = 'flex'; };
+    window.closeFairness = function() { document.getElementById('fairnessModal').style.display = 'none'; };
+    const fmtMin = ms => { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)} ชม. ${m % 60} นาที` : `${m} นาที`; };
+    function fairnessRows(now) {
+        const toMs = hhmm => {
+            const m = /^(\d{1,2}):(\d{2})/.exec(hhmm || ''); if (!m) return null;
+            const d = new Date(now); d.setHours(+m[1], +m[2], 0, 0);
+            if (d.getTime() > now + 60000) d.setDate(d.getDate() - 1);
+            return d.getTime();
+        };
+        const play = {}, onCourt = new Set();
+        matchHistory.forEach(m => { if (m.win && m.lose && m.duration) [...m.win, ...m.lose].forEach(p => { play[p] = (play[p] || 0) + m.duration; }); });
+        courts.forEach(c => {
+            if (!c.teamA || !c.teamB || c.isPaused || c.isGameOver) return;
+            [c.teamA.p1, c.teamA.p2, c.teamB.p1, c.teamB.p2].filter(Boolean).forEach(p => {
+                onCourt.add(p);
+                if (c.timerStart && !c.timerEnd) play[p] = (play[p] || 0) + (now - c.timerStart);
+            });
+        });
+        const rows = players.map(p => {
+            const st = playerStats[p] || {};
+            const arr = toMs(st.arrivalTime), games = (st.wins || 0) + (st.losses || 0);
+            const present = arr === null ? 0 : Math.max(0, now - arr), hrs = present / 3600000;
+            return { name: p, games, present, wait: Math.max(0, present - (play[p] || 0)), rate: hrs > 0 ? games / hrs : 0,
+                     onBreak: !!st.onBreak, onCourt: onCourt.has(p), eligible: present >= 20 * 60000 && !st.onBreak };
+        });
+        const el = rows.filter(r => r.eligible);
+        const avg = el.length ? el.reduce((t, r) => t + r.rate, 0) / el.length : 0;
+        rows.forEach(r => { r.low = r.eligible && avg > 0 && r.rate < avg * 0.7; r.high = r.eligible && avg > 0 && r.rate > avg * 1.3; });
+        return { rows, avg, gap: el.length ? Math.max(...el.map(r => r.games)) - Math.min(...el.map(r => r.games)) : 0 };
+    }
+    function renderFairness() {
+        const { rows, avg, gap } = fairnessRows(Date.now());
+        const c = document.getElementById('fairnessContainer');
+        if (rows.length === 0) { c.innerHTML = '<div style="text-align:center; padding:30px; color:#94a3b8;">ยังไม่มีผู้เล่น</div>'; return; }
+        const lows = rows.filter(r => r.low).map(r => escapeHTML(r.name));
+        const max = Math.max(1, ...rows.map(r => r.games));
+        const verdict = lows.length === 0
+            ? '<div style="background:#f0fdf4; color:#166534; padding:12px; border-radius:10px; margin-bottom:12px;">✅ การหมุนคิวสมดุลดี ไม่มีใครเล่นน้อยกว่าค่าเฉลี่ยอย่างชัดเจน</div>'
+            : `<div style="background:#fffbeb; color:#92400e; padding:12px; border-radius:10px; margin-bottom:12px;">⚠️ เล่นน้อยกว่าค่าเฉลี่ยชัดเจน: <b>${lows.join(', ')}</b></div>`;
+        const tag = (t, bg, fg) => ` <span style="font-size:11px; background:${bg}; color:${fg}; padding:1px 7px; border-radius:8px; white-space:nowrap;">${t}</span>`;
+        c.innerHTML = `${verdict}
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; font-size:13px; color:#475569;">
+                <span style="background:#f1f5f9; padding:6px 12px; border-radius:8px;">เฉลี่ย <b>${avg.toFixed(1)}</b> เกม/ชม.</span>
+                <span style="background:#f1f5f9; padding:6px 12px; border-radius:8px;">เล่นมากสุด-น้อยสุดต่างกัน <b>${gap}</b> เกม</span>
+            </div>` +
+            [...rows].sort((a, b) => b.games - a.games || a.name.localeCompare(b.name)).map(r => `
+            <div style="margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; gap:8px; font-size:14px;">
+                    <span style="font-weight:bold; word-break:break-word;">${escapeHTML(r.name)}${lvBadge(r.name)}${r.onCourt ? tag('🏸 กำลังแข่ง', '#dbeafe', '#1d4ed8') : ''}${r.onBreak ? tag('🛌 พัก', '#e2e8f0', '#475569') : ''}${r.low ? tag('เล่นน้อย', '#fef3c7', '#92400e') : ''}${r.high ? tag('เล่นมาก', '#ede9fe', '#5b21b6') : ''}${!r.eligible && !r.onBreak ? tag('เพิ่งมา', '#f1f5f9', '#64748b') : ''}</span>
+                    <b>${r.games} เกม</b>
+                </div>
+                <div style="background:#f1f5f9; border-radius:6px; height:10px; margin:4px 0;"><div style="height:10px; border-radius:6px; width:${Math.round(r.games / max * 100)}%; background:${r.low ? '#f59e0b' : r.onBreak ? '#94a3b8' : '#3b82f6'};"></div></div>
+                <div style="font-size:12px; color:#64748b;">อยู่มา ${fmtMin(r.present)} | รอรวมประมาณ ${fmtMin(r.wait)} | ${r.rate.toFixed(1)} เกม/ชม.</div>
+            </div>`).join('');
     }
 
     // --- ระดับฝีมือ (หน้าต่างตั้งค่า) ---
@@ -2942,7 +3161,7 @@ function generateAllValidTeams(excludeList) {
             // [แก้ไข] ล้าง localStorage ด้วยเสมอ ไม่ใช่แค่ Firebase
             localStorage.removeItem('badminton_game_state');
             if(window.clearCloudData) {
-                window.clearCloudData();
+                window.clearCloudData(gameId, 'end');
             } else {
                 window.location.href = 'index.html';
             }
@@ -3103,7 +3322,7 @@ function generateAllValidTeams(excludeList) {
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
+    import { getDatabase, ref, set, get, onValue, update, onDisconnect, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
 
     const firebaseConfig = {
         apiKey: "AIzaSyDjr0JN8PsYD2aij_ltzUk9GccN0gqsw4",
@@ -3118,66 +3337,167 @@ function generateAllValidTeams(excludeList) {
 
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
+    // ทุกอย่างอยู่ใต้ path เดิม (badminton/tournamentState) เพื่อให้กฎของ Firebase ที่ตั้งไว้ครอบคลุมเหมือนเดิม
     const dbRef = ref(db, 'badminton/tournamentState');
+    const v2Ref = ref(db, 'badminton/tournamentState/v2');
+    const endedRef = ref(db, 'badminton/tournamentState/lastEnded');
+    const clientId = Math.random().toString(36).slice(2, 10);
+
+    // ===== บันทึกทีละส่วน (v2) =====
+    // เกมถูกแยกเป็น global (คิว สถิติ ประวัติ ฯลฯ) + courts/0, courts/1, ... แล้วเขียนเฉพาะส่วนที่เปลี่ยนจริง
+    // แต่ละส่วนมีเลขรุ่น (rev) เพิ่มทุกครั้งที่เขียน ถ้าเห็นเลขรุ่นเดียวกันแต่เนื้อหาต่างจากที่เราเขียน = มีคนเขียนชนกัน
+    function _splitForCloud(stateStr, cloud, revs) {
+        const obj = JSON.parse(stateStr);
+        const courts = obj.courts || [];
+        delete obj.courts;
+        const upd = {}, mine = {}, next = { global: cloud.global, courts: { ...cloud.courts } }, nextRevs = { ...revs };
+        const bump = (k, str) => { const r = (revs[k] || 0) + 1; upd['rev/' + k] = r; nextRevs[k] = r; mine[k] = { rev: r, str, t: Date.now() }; };
+        const g = JSON.stringify(obj);
+        if (g !== cloud.global) { upd.global = g; next.global = g; bump('global', g); }
+        courts.forEach((c, i) => {
+            const s = JSON.stringify(c);
+            if (s !== cloud.courts[i]) { upd['courts/' + i] = s; next.courts[i] = s; bump('c' + i, s); }
+        });
+        Object.keys(cloud.courts).forEach(k => {
+            if (Number(k) >= courts.length) { upd['courts/' + k] = null; upd['rev/c' + k] = null; delete next.courts[k]; delete nextRevs['c' + k]; }
+        });
+        return { upd, next, mine, revs: nextRevs };
+    }
+    function _joinFromCloud(val) {
+        if (!val || !val.global) return null;
+        const cv = val.courts || {};
+        const keys = Object.keys(cv).filter(k => cv[k] != null).sort((a, b) => a - b);
+        const st = JSON.parse(val.global);
+        st.courts = keys.map(k => JSON.parse(cv[k]));
+        const courts = {}, nodes = { global: val.global };
+        keys.forEach(k => { courts[k] = cv[k]; nodes['c' + k] = cv[k]; });
+        return { st, nodes, revs: val.rev || {}, cloud: { global: val.global, courts }, sig: val.global + '\u0001' + keys.map(k => k + ':' + cv[k]).join('\u0001') };
+    }
+    // คืนรายชื่อส่วนที่ "ถูกเขียนทับ" ตอนนี้ (เลขรุ่นเท่าที่เราเขียน แต่เนื้อหาไม่ใช่ของเรา)
+    function _detectConflicts(nodes, revs, mine, now) {
+        const out = [];
+        Object.keys(mine).forEach(k => {
+            const m = mine[k], r = revs[k];
+            if (r === m.rev && nodes[k] !== undefined && nodes[k] !== m.str) { out.push(k); delete mine[k]; }
+            else if ((r !== undefined && r > m.rev) || now - m.t >= 60000) delete mine[k];
+        });
+        return out;
+    }
+
+    let _cloud = { global: null, courts: {} }; // ค่าล่าสุดบนคลาวด์ ไว้เทียบว่าส่วนไหนเปลี่ยนจริง
+    let _revs = {}, _mine = {}, _blockWrites = false;
+    let _status = 'connecting', _devices = 0, _meta = { t: 0, by: null }, _offset = 0, _connected = false;
 
     window.saveToCloud = function(stateStr) {
-        // [แก้ไข] เซฟเป็น { data: "string" } แทนที่จะ JSON.parse แล้วเซฟเป็น object
-        // เพราะ Firebase ไม่อนุญาตให้ใช้ . $ # [ ] / ใน key
-        // และชื่อผู้เล่นถูกใช้เป็น key ใน historyPairs/playerStats → ถ้าชื่อมีจุดจะ reject ทั้งหมด
-        set(dbRef, { data: stateStr })
-            .then(() => {
-                _setCloudStatus('online');
-            })
-            .catch((err) => {
-                console.error('Firebase save error:', err);
-                _setCloudStatus('error');
-            });
+        if (_blockWrites) return; // กำลังล้าง/รีเซ็ตเกม ห้ามส่งเกมเก่ากลับขึ้นไป
+        let r;
+        try { r = _splitForCloud(stateStr, _cloud, _revs); } catch (e) { console.error('Firebase split error:', e); return; }
+        if (Object.keys(r.upd).length === 0) return; // ไม่มีอะไรเปลี่ยน ไม่ต้องเขียน
+        _cloud = r.next; _revs = r.revs; Object.assign(_mine, r.mine);
+        r.upd.meta = { t: serverTimestamp(), by: clientId };
+        update(v2Ref, r.upd)
+            .then(() => { _status = 'online'; _renderCloud(); })
+            .catch((err) => { console.error('Firebase save error:', err); _status = 'error'; _renderCloud(); });
     };
-    window.clearCloudData = function() {
-        // [แก้ไข] ล้าง Firebase แล้ว redirect เสมอ ไม่ว่า Firebase จะสำเร็จหรือไม่
-        // ป้องกันปัญหากดจบแล้วค้างเพราะ Firebase error หรือเน็ตหลุด
-        remove(dbRef)
+    // ล้างเกมบนคลาวด์ และทิ้งป้ายบอกเครื่องอื่นว่าเกมนี้ถูกจบแล้ว (kind: 'end' = จบการแข่งขัน, 'discard' = ล้างทิ้ง)
+    window.clearCloudData = function(gameId, kind) {
+        _blockWrites = true;
+        let done = false;
+        const go = () => { if (done) return; done = true; window.location.href = 'index.html'; };
+        setTimeout(go, 3000); // เน็ตหลุดก็ไม่ค้าง
+        update(dbRef, { v2: null, lastEnded: { g: gameId == null ? null : String(gameId), k: kind || 'end', t: serverTimestamp() } })
             .catch((err) => { console.error('Firebase clear error (non-blocking):', err); })
-            .finally(() => { window.location.href = 'index.html'; });
+            .finally(go);
     };
-    let _cloudInitialized = false;
 
-    onValue(dbRef, (snapshot) => {
-        const val = snapshot.val();
-        // [แก้ไข] รับ { data: "string" } แล้ว parse กลับเป็น object ก่อนส่งไป restoreFromCloud
-        const cloudData = val && val.data ? JSON.parse(val.data) : null;
+    function _remoteReset() {
+        if (!(window.hasActiveGame && window.hasActiveGame())) return;
+        _blockWrites = true;
+        get(endedRef).then(s => s.val()).catch(() => null)
+            .then(t => window.handleRemoteReset && window.handleRemoteReset(t && t.k ? t.k : 'end'));
+    }
+    // เชื่อมครั้งแรกแล้วคลาวด์ว่าง: ถ้าเกมในเครื่องนี้ถูกจบจากเครื่องอื่นไปแล้ว ห้ามส่งขึ้นไปใหม่
+    function _emptyOnConnect() {
+        const localState = localStorage.getItem('badminton_game_state');
+        if (!localState) return;
+        let gid = null; try { gid = JSON.parse(localState).gameId; } catch (e) {}
+        const push = () => { if (window.saveToCloud) window.saveToCloud(localState); };
+        if (gid == null) { push(); return; }
+        get(endedRef).then(s => {
+            const t = s.val();
+            if (t && String(t.g) === String(gid)) { _blockWrites = true; window.handleRemoteReset && window.handleRemoteReset(t.k || 'end'); }
+            else push();
+        }).catch(push);
+    }
 
-        if (cloudData && window.restoreFromCloud) {
-            // Firebase มีข้อมูล → sync มาที่เครื่องนี้
-            window.restoreFromCloud(cloudData);
-        } else if (!cloudData && !_cloudInitialized) {
-            // Firebase ว่างเปล่า + เชื่อมสำเร็จครั้งแรก
-            // → ถ้าเครื่องนี้มีข้อมูลใน localStorage ให้ push ขึ้น Firebase ทันที
-            const localState = localStorage.getItem('badminton_game_state');
-            if (localState && window.saveToCloud) {
-                window.saveToCloud(localState);
+    let _cloudInitialized = false, _lastSig = null;
+    onValue(v2Ref, (snapshot) => {
+        let j = null;
+        try { j = _joinFromCloud(snapshot.val()); }
+        catch (e) { console.error('Firebase parse error:', e); _status = 'error'; _renderCloud(); return; }
+        if (j) {
+            _detectConflicts(j.nodes, j.revs, _mine, Date.now()).forEach(k => {
+                const what = k === 'global' ? 'ข้อมูลคิว/สถิติ' : 'คอร์ด ' + (Number(k.slice(1)) + 1);
+                if (window.showSyncWarning) window.showSyncWarning(what + 'ถูกแก้พร้อมกันจากอีกเครื่อง ผลที่คุณเพิ่งกดอาจถูกทับ กรุณาตรวจสอบอีกครั้ง');
+            });
+            _cloud = j.cloud; _revs = j.revs;
+            if (j.sig !== _lastSig) { // ข้ามถ้าข้อมูลเกมไม่เปลี่ยน (เช่น มีแค่เครื่องเข้า/ออก)
+                _lastSig = j.sig;
+                if (window.restoreFromCloud) window.restoreFromCloud(j.st);
             }
+        } else {
+            _cloud = { global: null, courts: {} }; _revs = {}; _mine = {}; _lastSig = null;
+            if (!_cloudInitialized) _emptyOnConnect();
+            else if (!_blockWrites) _remoteReset(); // เกมบนคลาวด์ถูกล้างจากเครื่องอื่น
         }
-
         _cloudInitialized = true;
-        _setCloudStatus('online');
+        _status = 'online';
+        _renderCloud();
     }, (err) => {
         console.error('Firebase listen error:', err);
-        _setCloudStatus('error');
+        _status = 'error';
+        _renderCloud();
     });
 
-    // อัปเดต indicator 🟢/🔴 บน top-nav ให้สะท้อนสถานะ sync จริงๆ
-    function _setCloudStatus(status) {
+    // ===== จำนวนเครื่องที่ออนไลน์ + เวลาอัปเดตล่าสุด =====
+    const presRef = ref(db, 'badminton/tournamentState/presence');
+    const meRef = ref(db, 'badminton/tournamentState/presence/' + clientId);
+    function _registerPresence() {
+        onDisconnect(meRef).remove().then(() => set(meRef, { t: serverTimestamp() })).catch(() => {});
+    }
+    onValue(ref(db, '.info/connected'), (s) => { _connected = s.val() === true; if (_connected) _registerPresence(); _renderCloud(); });
+    onValue(ref(db, '.info/serverTimeOffset'), (s) => { _offset = s.val() || 0; });
+    onValue(presRef, (s) => {
+        const v = s.val() || {};
+        _devices = Object.keys(v).length;
+        if (_connected && !v[clientId]) _registerPresence();
+        _renderCloud();
+    });
+    onValue(ref(db, 'badminton/tournamentState/v2/meta'), (s) => {
+        const m = s.val();
+        if (m && m.t) { _meta = { t: m.t, by: m.by }; _renderCloud(); }
+    });
+
+    function _ago(sec) {
+        if (sec < 5) return 'เมื่อสักครู่';
+        if (sec < 60) return sec + ' วินาทีก่อน';
+        if (sec < 3600) return Math.floor(sec / 60) + ' นาทีก่อน';
+        return Math.floor(sec / 3600) + ' ชม.ก่อน';
+    }
+    function _renderCloud() {
         const el = document.querySelector('.top-nav span[style*="color"]');
         if (!el) return;
-        if (status === 'online') {
-            el.textContent = '🟢 ออนไลน์';
-            el.style.color = '#10b981';
-        } else {
-            el.textContent = '🔴 sync ล้มเหลว';
-            el.style.color = '#ef4444';
+        if (_status === 'error') { el.textContent = '🔴 sync ล้มเหลว'; el.style.color = '#ef4444'; return; }
+        let t = '🟢 ออนไลน์';
+        if (_devices > 0) t += ' ' + _devices + ' เครื่อง';
+        if (_meta.t) {
+            const sec = Math.max(0, Math.round((Date.now() + _offset - _meta.t) / 1000));
+            t += ' | อัปเดตล่าสุด ' + _ago(sec) + (_meta.by === clientId ? ' (เครื่องนี้)' : ' (เครื่องอื่น)');
         }
+        el.textContent = t;
+        el.style.color = '#10b981';
     }
+    setInterval(_renderCloud, 1000);
 </script>
 
 </body>
