@@ -1243,6 +1243,52 @@ function bestGroupSplit(pool) {
     return { teamA: [...pick.teamA], teamB: [...pick.teamB] };
 }
 
+// ── [ใหม่] คอร์ทเดียว + คนรอเยอะ (เช่น 1 คอร์ท 8 คน): เลือก 4 คนที่ "หน้าใหม่ต่อกันมากที่สุด" ──
+// ปัญหาเดิม: คนที่นั่งพักถูกดึงลงต่อกันตามคิวเสมอ → 8 คนแตกเป็น 2 กลุ่ม 4 คนที่สลับกันเล่นกันเอง
+// หลักการ: ความยุติธรรมมาก่อน (คนที่ลงเล่นน้อยกว่าต้องได้ลงก่อน) แล้วค่อยเลือกในกลุ่มที่เล่นเท่ากัน
+// ให้ 4 คนนั้นเคยจับคู่/เจอกันน้อยที่สุด และเลี่ยงคนที่เพิ่งลงเมื่อกี้เล็กน้อย
+function bestSingleCourtGroup(pool) {
+    const n = pool.length;
+    if (n < 8 || n > 12) return null;
+    if (pool.some(p => lockedPairs[p])) return null; // มีคู่ล็อค → ใช้ตรรกะเดิม
+
+    const played = p => (playerStats[p] && playerStats[p].played) || 0;
+    const justPlayed = p => !!playerStats[p] && (playerStats[p].waitingRounds || 0) === 0 && played(p) > 0;
+    const sorted = [...pool].sort((a, b) => played(a) - played(b));
+    const t = played(sorted[3]);                         // เกณฑ์จำนวนเกมของคนที่ 4
+    const must = sorted.filter(p => played(p) < t);      // ลงเล่นน้อยกว่าเกณฑ์ → ต้องได้ลง
+    const fill = sorted.filter(p => played(p) === t);    // กลุ่มที่เล่นเท่ากัน เลือกได้อิสระ
+    const need = 4 - must.length;
+    if (need <= 0 || fill.length < need) return null;
+
+    const FAM_PARTNER = PARTNER_WEIGHT, FAM_OPP = OPP_WEIGHT, RECENT_PEN = 6;
+    const fam = (a, b) => ((historyPairs[a] && historyPairs[a][b]) || 0) * FAM_PARTNER + ((opponentHistory[a] && opponentHistory[a][b]) || 0) * FAM_OPP;
+
+    let best = Infinity, bestSets = [];
+    const pick = [];
+    (function rec(start) {
+        if (pick.length === need) {
+            const set = [...must, ...pick];
+            let cost = 0;
+            for (let i = 0; i < 4; i++) {
+                if (justPlayed(set[i])) cost += RECENT_PEN;
+                for (let j = i + 1; j < 4; j++) cost += fam(set[i], set[j]);
+            }
+            let bw = Infinity;
+            allCombos(set).forEach(c => { bw = Math.min(bw, comboWeight(c, set)); });
+            cost += bw;
+            if (cost < best) { best = cost; bestSets = [set]; } else if (cost === best) bestSets.push(set);
+            return;
+        }
+        for (let i = start; i < fill.length; i++) { pick.push(fill[i]); rec(i + 1); pick.pop(); }
+    })(0);
+    if (!bestSets.length) return null;
+
+    const set = bestSets[Math.floor(Math.random() * bestSets.length)];
+    const opt = optimizeFourPlayers(set);
+    return { teamA: [...opt.teamA], teamB: [...opt.teamB] };
+}
+
 // ════════════════════════════════════════════════════════════════════
 // MATCHMAKING ENGINE V2 — Constraint-based Pipeline (Phase 1, ตาม Design Doc)
 // ════════════════════════════════════════════════════════════════════
@@ -2084,6 +2130,10 @@ function generateAllValidTeams(excludeList) {
 
                     if (poolNow.length === pendingCourts * 4 && pendingCourts >= 2) {
                         jointSplit = bestGroupSplit(poolNow);
+                    } else if (pendingCourts === 1 && poolNow.length >= 8) {
+                        // คอร์ทเดียวที่ใช้งาน (ไม่มีคอร์ทอื่นแข่ง/รออยู่) + คนรอเยอะ → หมุนหน้าใหม่ ไม่ให้วนกลุ่มเดิม
+                        let otherActive = courts.some((c, ci) => ci !== courtIndex && !c.isPaused && (c.isGameOver || (c.teamA && c.teamB)));
+                        if (!otherActive) jointSplit = bestSingleCourtGroup(poolNow);
                     }
                 }
 
