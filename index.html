@@ -1137,60 +1137,110 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
 }
 
 // 🌟 2. อัปเกรดลอจิกเกลี่ยทีมย่อย ( optimizeFourPlayers ) ตัวการทำบิ๊กลูปแตก!
-function optimizeFourPlayers(pArr) {
-    if (!pArr || pArr.length !== 4) return { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] };
-    
-    const combinations = [
+// น้ำหนัก (ยิ่งน้อยยิ่งดี) ของการแบ่ง 4 คนเป็น 2 ทีมแบบหนึ่ง; คืน Infinity ถ้าผิดกฎคู่ล็อค
+function comboWeight(combo, pArr) {
+    let violatesLock = false;
+    [combo.teamA, combo.teamB].forEach(team => team.forEach(p => {
+        if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && !team.includes(lockedPairs[p])) violatesLock = true;
+    }));
+    if (violatesLock) return Infinity;
+
+    const wA = (historyPairs[combo.teamA[0]] && historyPairs[combo.teamA[0]][combo.teamA[1]]) || 0;
+    const wB = (historyPairs[combo.teamB[0]] && historyPairs[combo.teamB[0]][combo.teamB[1]]) || 0;
+
+    // penalty คู่ partner ซ้ำ
+    let penalty = 0;
+    if (wA > 0) penalty += OPP_FLAT + wA * OPP_SCALE;
+    if (wB > 0) penalty += OPP_FLAT + wB * OPP_SCALE;
+
+    // penalty คู่ต่อสู้ซ้ำ: ผลรวมของ opponentHistory ทุกคู่ข้ามทีม
+    let oppScore = 0;
+    combo.teamA.forEach(a => combo.teamB.forEach(b => {
+        oppScore += (opponentHistory[a] && opponentHistory[a][b]) || 0;
+    }));
+    if (oppScore > 0) penalty += oppScore * OPP_WEIGHT;
+
+    const levelPen = levelStrength * LEVEL_SPLIT_W * Math.abs(lvSum(combo.teamA) - lvSum(combo.teamB));
+    return wA + wB + penalty + levelPen;
+}
+
+function allCombos(pArr) {
+    return [
         { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] },
         { teamA: [pArr[0], pArr[2]], teamB: [pArr[1], pArr[3]] },
         { teamA: [pArr[0], pArr[3]], teamB: [pArr[1], pArr[2]] }
     ];
-    
+}
+
+function optimizeFourPlayers(pArr) {
+    if (!pArr || pArr.length !== 4) return { teamA: [pArr[0], pArr[1]], teamB: [pArr[2], pArr[3]] };
+
     let bestCombos = [];
     let minWeight = Infinity;
-    
-    combinations.forEach(combo => {
-        let violatesLock = false;
-        combo.teamA.forEach(p => {
-            if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && !combo.teamA.includes(lockedPairs[p])) violatesLock = true;
-        });
-        combo.teamB.forEach(p => {
-            if (lockedPairs[p] && pArr.includes(lockedPairs[p]) && !combo.teamB.includes(lockedPairs[p])) violatesLock = true;
-        });
-        
-        if (violatesLock) return;
 
-        const wA = (historyPairs[combo.teamA[0]] && historyPairs[combo.teamA[0]][combo.teamA[1]]) || 0;
-        const wB = (historyPairs[combo.teamB[0]] && historyPairs[combo.teamB[0]][combo.teamB[1]]) || 0;
-        
-        // penalty คู่ partner ซ้ำ
-        let penalty = 0;
-        if (wA > 0) penalty += OPP_FLAT + wA * OPP_SCALE;
-        if (wB > 0) penalty += OPP_FLAT + wB * OPP_SCALE;
-
-        // penalty คู่ต่อสู้ซ้ำ: ผลรวมของ opponentHistory ทุกคู่ข้ามทีม
-        let oppScore = 0;
-        combo.teamA.forEach(a => combo.teamB.forEach(b => {
-            oppScore += (opponentHistory[a] && opponentHistory[a][b]) || 0;
-        }));
-        if (oppScore > 0) penalty += oppScore * OPP_WEIGHT;
-
-        const levelPen = levelStrength * LEVEL_SPLIT_W * Math.abs(lvSum(combo.teamA) - lvSum(combo.teamB));
-        const totalWeight = wA + wB + penalty + levelPen;
-        
+    allCombos(pArr).forEach(combo => {
+        const totalWeight = comboWeight(combo, pArr);
+        if (totalWeight === Infinity) return;
         if (totalWeight < minWeight) {
             minWeight = totalWeight;
             bestCombos = [combo];
         } else if (totalWeight === minWeight) {
-            // [แก้ไข] เมื่อ weight เท่ากัน ให้เก็บไว้ทุก combination แล้วสุ่มเลือก
-            // เดิมเลือก combination แรกเสมอ ทำให้คู่แข็งตัวไม่หมุน
+            // เมื่อ weight เท่ากัน เก็บไว้ทุก combination แล้วสุ่มเลือก (ไม่ให้คู่แข็งตัว)
             bestCombos.push(combo);
         }
     });
-    
-    if (bestCombos.length === 0) return combinations[0];
-    // สุ่มเลือกจาก combination ที่ดีที่สุดเท่ากัน
+
+    if (bestCombos.length === 0) return allCombos(pArr)[0];
     return bestCombos[Math.floor(Math.random() * bestCombos.length)];
+}
+
+// ── [ใหม่] แบ่งผู้เล่นที่ว่างทั้งหมดเป็นกลุ่มละ 4 คนพร้อมกัน (ข้ามคอร์ท) ──
+// ใช้เมื่อ "ทุกคนที่ว่างจะได้ลงสนามอยู่แล้ว" (จำนวนคนว่าง = 4 × จำนวนคอร์ทที่รอจัดคู่)
+// จึงไม่มีเรื่องลำดับคิว เลือกการแบ่งกลุ่มที่ทำให้คู่ซ้ำน้อยที่สุดได้เลย
+// (แทนที่จะหยิบ 4 คนหน้าคิว ซึ่งมักเป็นกลุ่มเดิมจากคอร์ทเดียวกัน)
+// คืน { teamA:[..], teamB:[..] } ของกลุ่มแรก หรือ null ถ้าไม่เข้าเงื่อนไข
+function bestGroupSplit(pool) {
+    const n = pool.length;
+    if (n < 8 || n > 12 || n % 4 !== 0) return null;
+
+    // ต้องไม่ให้คู่ล็อคถูกแยกข้ามกลุ่ม
+    const splitsLock = (group) => group.some(p => lockedPairs[p] && pool.includes(lockedPairs[p]) && !group.includes(lockedPairs[p]));
+
+    const groupCost = (g) => {
+        let best = Infinity, combos = [];
+        allCombos(g).forEach(c => {
+            const w = comboWeight(c, g);
+            if (w < best) { best = w; combos = [c]; } else if (w === best) combos.push(c);
+        });
+        return { cost: best, combo: combos[Math.floor(Math.random() * combos.length)] };
+    };
+
+    // แจกแจงการแบ่งเป็นกลุ่มละ 4 (กลุ่มแรกต้องมีคนแรกของ pool เสมอ เพื่อไม่ให้นับซ้ำ)
+    let best = { cost: Infinity, groups: [] };
+    function rec(rest, groups, cost) {
+        if (cost >= best.cost + 1e-9 && best.cost !== Infinity && cost > best.cost) return;
+        if (rest.length === 0) {
+            if (cost < best.cost || (cost === best.cost && Math.random() < 0.5)) best = { cost, groups: groups.slice() };
+            return;
+        }
+        const first = rest[0], others = rest.slice(1);
+        for (let a = 0; a < others.length; a++) for (let b = a + 1; b < others.length; b++) for (let c = b + 1; c < others.length; c++) {
+            const g = [first, others[a], others[b], others[c]];
+            if (splitsLock(g)) continue;
+            const gc = groupCost(g);
+            if (gc.cost === Infinity) continue;
+            const remain = others.filter((_, idx) => idx !== a && idx !== b && idx !== c);
+            groups.push(gc.combo);
+            rec(remain, groups, cost + gc.cost);
+            groups.pop();
+        }
+    }
+    rec(pool.slice(), [], 0);
+    if (best.cost === Infinity || best.groups.length === 0) return null;
+
+    // คอร์ทที่กำลังกดอยู่ได้ "กลุ่มที่ดีที่สุดในแง่ต้นทุนต่ำสุด" — สุ่มเลือกจากกลุ่มที่ได้
+    const pick = best.groups[Math.floor(Math.random() * best.groups.length)];
+    return { teamA: [...pick.teamA], teamB: [...pick.teamB] };
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1992,7 +2042,27 @@ function generateAllValidTeams(excludeList) {
 
             let data = court.nextMatchData;
             let req = (court.matchType === 'singles') ? 1 : 2;
-            
+
+            // [แก้ไข] ประเภทคู่ + แชมป์ครบ: ถ้าเหลือคนว่างแค่ 4 คนเดิมที่เพิ่งจบ และอีกคอร์ทยังแข่งอยู่
+            // จะผสมกลุ่มข้ามคอร์ทไม่ได้ → ให้เลือกว่าจะรอคอร์ทอื่นจบก่อนหรือเล่นกลุ่มเดิมต่อ
+            // (ตรวจก่อนแก้ state ใดๆ เพื่อให้คะแนน/รอบของคอร์ทนี้ไม่เปลี่ยนถ้าเลือกรอ)
+            if (req === 2 && data && data.isChampOut && !DEMO) {
+                let poolNow = getAvailablePlayers([]);
+                let playingOthers = courts.filter((c, ci) => ci !== courtIndex && !c.isPaused && !c.isGameOver && c.teamA && c.teamB);
+                let prevGroup = [data.winner.p1, data.winner.p2, data.loser.p1, data.loser.p2].filter(Boolean);
+                let sameGroup = poolNow.length === 4 && prevGroup.length === 4 && prevGroup.every(p => poolNow.includes(p));
+                if (sameGroup && playingOthers.length > 0) {
+                    let waitOther = confirm(
+                        `ตอนนี้จะได้ผู้เล่น 4 คนเดิมซ้ำใน ${court.name} (เพราะอีกคอร์ทยังแข่งอยู่ ไม่มีคนอื่นว่าง)\n\n` +
+                        `• กด [OK] = รอให้คอร์ทอื่นจบก่อน แล้วค่อยสลับคนข้ามคอร์ทให้ได้คู่ใหม่ๆ\n` +
+                        `• กด [Cancel] = เล่นกลุ่มเดิมต่อทันที`);
+                    if (waitOther) {
+                        showNotification('⏳ รอคอร์ทอื่นจบก่อน แล้วกด "สุ่มดึงคู่ลงสนาม" อีกครั้งเพื่อสลับกลุ่ม', '#0ea5e9');
+                        return;
+                    }
+                }
+            }
+
             court.isGameOver = false; court.scoreA = 0; court.scoreB = 0; court.matchRound++;
             //court.stateBeforeFinishStr = null; // ปิดไว้เพื่อให้ย้อนผลได้
 
@@ -2004,9 +2074,25 @@ function generateAllValidTeams(excludeList) {
                 // [แก้ไข Bug] ล้าง cache เสมอก่อนเลือกผู้เล่น
                 // เพราะ cache ถูกสร้างตอนแมตช์ยังไม่จบ ณ เวลานั้น lastBenchTime ของคนแพ้ยังไม่ถูก set
                 // หากใช้ cache ตรงๆ จะข้ามการกรอง restedPool ทำให้คนแพ้รอบล่าสุดถูกดึงลงสนามซ้ำได้
-                let pvFull = consumePreview('full', req);
+                // [แก้ไข] ประเภทคู่ + ไม่มีแชมป์ค้าง: ถ้า "ทุกคนที่ว่างจะได้ลงอยู่แล้ว" ให้แบ่งกลุ่มข้ามคอร์ทพร้อมกัน
+                // ไม่งั้นจะได้กลุ่ม 4 คนเดิมวนซ้ำในคอร์ทเดียวกัน (เช่น 8 คน 2 คอร์ท)
+                let jointSplit = null;
+                if (req === 2) {
+                    let poolNow = getAvailablePlayers([]);
+                    // นับคอร์ทที่รอจัดคู่ = คอร์ทอื่นที่จบแล้ว + คอร์ทนี้ (ถูกตั้ง isGameOver=false ไปแล้วด้านบน)
+                    let pendingCourts = 1 + courts.filter((c, ci) => ci !== courtIndex && !c.isPaused && c.isGameOver && (c.matchType || 'doubles') !== 'singles').length;
+
+                    if (poolNow.length === pendingCourts * 4 && pendingCourts >= 2) {
+                        jointSplit = bestGroupSplit(poolNow);
+                    }
+                }
+
+                let pvFull = jointSplit ? null : consumePreview('full', req);
                 if (pvFull) usedPreview = true; else clearPreviewCache();
-                if (pvFull) {
+                if (jointSplit) {
+                    teamA = jointSplit.teamA; teamB = jointSplit.teamB;
+                    preOptimized = jointSplit;
+                } else if (pvFull) {
                     // ใช้ผลที่พรีวิวไว้ตรงๆ (ทีมที่ optimize แล้ว) เพื่อให้ตรงกับที่แสดง
                     teamA = pvFull.teamA; teamB = pvFull.teamB;
                     preOptimized = pvFull;
