@@ -2142,7 +2142,7 @@ function generateAllValidTeams(excludeList) {
                 // หากใช้ cache ตรงๆ จะข้ามการกรอง restedPool ทำให้คนแพ้รอบล่าสุดถูกดึงลงสนามซ้ำได้
                 // [แก้ไข] ประเภทคู่ + ไม่มีแชมป์ค้าง: ถ้า "ทุกคนที่ว่างจะได้ลงอยู่แล้ว" ให้แบ่งกลุ่มข้ามคอร์ทพร้อมกัน
                 // ไม่งั้นจะได้กลุ่ม 4 คนเดิมวนซ้ำในคอร์ทเดียวกัน (เช่น 8 คน 2 คอร์ท)
-                let jointSplit = null;
+                let jointSplit = null, singlePv = null;
                 if (req === 2) {
                     let poolNow = getAvailablePlayers([]);
                     // นับคอร์ทที่รอจัดคู่ = คอร์ทอื่นที่จบแล้ว + คอร์ทนี้ (ถูกตั้ง isGameOver=false ไปแล้วด้านบน)
@@ -2153,11 +2153,15 @@ function generateAllValidTeams(excludeList) {
                     } else if (pendingCourts === 1 && poolNow.length >= 8) {
                         // คอร์ทเดียวที่ใช้งาน (ไม่มีคอร์ทอื่นแข่ง/รออยู่) + คนรอเยอะ → หมุนหน้าใหม่ ไม่ให้วนกลุ่มเดิม
                         let otherActive = courts.some((c, ci) => ci !== courtIndex && !c.isPaused && (c.isGameOver || (c.teamA && c.teamB)));
-                        if (!otherActive) jointSplit = bestSingleCourtGroup(poolNow);
+                        if (!otherActive) {
+                            // ถ้ามีพรีวิวที่ยังใช้ได้ ใช้ตามพรีวิวเลย (พรีวิวคำนวณด้วยตรรกะเดียวกัน) ผลจึงตรงกับที่โชว์
+                            singlePv = consumePreview('full', req);
+                            if (!singlePv) jointSplit = bestSingleCourtGroup(poolNow);
+                        }
                     }
                 }
 
-                let pvFull = jointSplit ? null : consumePreview('full', req);
+                let pvFull = jointSplit ? null : (singlePv || consumePreview('full', req));
                 if (pvFull) usedPreview = true; else clearPreviewCache();
                 if (jointSplit) {
                     teamA = jointSplit.teamA; teamB = jointSplit.teamB;
@@ -2420,6 +2424,36 @@ function generateAllValidTeams(excludeList) {
         saveData();
     }
 
+    // [ใหม่] พรีวิวกรณี 1 คอร์ท (ล้างสนามจัดใหม่) ให้ตรงกับที่ปุ่มจัดจริงจะใช้ (bestSingleCourtGroup)
+    // พรีวิวทำตอนที่แมตช์ยังไม่จบ → จำลองว่า 4 คนในสนามจะกลับเข้าคิวหลังจบ (played+1, waitingRounds=0 และคนที่รออยู่ +1)
+    // ประวัติคู่ (historyPairs/opponentHistory) ถูกบันทึกตั้งแต่ "เริ่มแมตช์" อยู่แล้ว จึงไม่ต้องจำลอง
+    // คืน {teamA,teamB} หรือ null ถ้าไม่เข้าเงื่อนไข (ให้ใช้ตรรกะเดิมของพรีวิว)
+    function previewSingleCourtFull() {
+        let active = courts.filter(c => !c.isPaused);
+        if (active.length !== 1 || (active[0].matchType || 'doubles') === 'singles') return null;
+        let c = active[0];
+        let playing = (!c.isGameOver && c.teamA && c.teamB && c.teamA.p2 && c.teamB.p2)
+            ? [c.teamA.p1, c.teamA.p2, c.teamB.p1, c.teamB.p2] : [];
+        let waiting = getAvailablePlayers([]);
+        let combined = [...new Set([...waiting, ...playing.filter(p => playerStats[p] && !playerStats[p].onBreak)])];
+        if (combined.length < 8) return null;
+
+        // snapshot → จำลอง → คืนค่าเดิมเสมอ
+        let snap = {};
+        combined.forEach(p => { snap[p] = { played: playerStats[p].played, waitingRounds: playerStats[p].waitingRounds }; });
+        try {
+            if (playing.length) {
+                combined.forEach(p => {
+                    if (playing.includes(p)) { playerStats[p].played = (playerStats[p].played || 0) + 1; playerStats[p].waitingRounds = 0; }
+                    else playerStats[p].waitingRounds = (playerStats[p].waitingRounds || 0) + 1;
+                });
+            }
+            return bestSingleCourtGroup(combined);
+        } finally {
+            combined.forEach(p => { playerStats[p].played = snap[p].played; playerStats[p].waitingRounds = snap[p].waitingRounds; });
+        }
+    }
+
     window.generateNextPreview = function() {
             let pool = getAvailablePlayers([]);
             let box = document.getElementById('nextUpPreviewBox');
@@ -2449,6 +2483,11 @@ function generateAllValidTeams(excludeList) {
                         let optimized = optimizeFourPlayers([tA[0], tA[1], tB[0], tB[1]]);
                         fullMatchObj = { teamA: [...optimized.teamA], teamB: [...optimized.teamB] };
                     }
+                }
+                // [ใหม่] 1 คอร์ท: ให้ผล "ล้างสนามจัดใหม่" ตรงกับที่ปุ่มจัดจริงจะคำนวณ
+                if (i === 0 && expected === 1) {
+                    let smart = previewSingleCourtFull();
+                    if (smart) fullMatchObj = { teamA: [...smart.teamA], teamB: [...smart.teamB] };
                 }
                 slots.push({ challengers: [tA[0], tA[1]], fullMatch: fullMatchObj });
                 used.push(tA[0], tA[1]);
