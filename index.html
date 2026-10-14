@@ -1243,10 +1243,14 @@ function bestGroupSplit(pool) {
     return { teamA: [...pick.teamA], teamB: [...pick.teamB] };
 }
 
-// ── [ใหม่] คอร์ทเดียว + คนรอเยอะ (เช่น 1 คอร์ท 8 คน): เลือก 4 คนที่ "หน้าใหม่ต่อกันมากที่สุด" ──
-// ปัญหาเดิม: คนที่นั่งพักถูกดึงลงต่อกันตามคิวเสมอ → 8 คนแตกเป็น 2 กลุ่ม 4 คนที่สลับกันเล่นกันเอง
-// หลักการ: ความยุติธรรมมาก่อน (คนที่ลงเล่นน้อยกว่าต้องได้ลงก่อน) แล้วค่อยเลือกในกลุ่มที่เล่นเท่ากัน
-// ให้ 4 คนนั้นเคยจับคู่/เจอกันน้อยที่สุด และเลี่ยงคนที่เพิ่งลงเมื่อกี้เล็กน้อย
+// ── [ใหม่] คอร์ทเดียว + คนรอเยอะ (เช่น 1 คอร์ท 8-9 คน): เลือก 4 คนโดย "คิวมาก่อน หน้าใหม่ทีหลัง" ──
+// ลำดับความสำคัญ:
+//   1) ลงเล่นน้อยกว่าต้องได้ลงก่อน (played)
+//   2) ในกลุ่มที่เล่นเท่ากัน คนที่พักมาแล้ว (waitingRounds>0) ได้สิทธิ์ก่อน
+//      คนที่เพิ่งลงเมื่อกี้ (waitingRounds===0) จะไม่ถูกเลือก ถ้ายังมีคนที่พักมาแล้วเหลือพอ
+//   3) ข้อยกเว้นเดียว: ถ้ากฎข้อ 2 บังคับให้ได้ "4 คนเดิมที่ทุกคู่เคยเจอกันหมดแล้ว" (กลุ่มปิด เช่น 8 คน 1 คอร์ท)
+//      ยอมให้คนที่เพิ่งลงมาสลับเข้าได้ไม่เกิน 2 คน เพื่อไม่ให้วนกลุ่มเดิม
+//   4) ภายในตัวเลือกที่สิทธิ์เท่ากัน เลือก 4 คนที่เคยจับคู่/เจอกันน้อยที่สุด
 function bestSingleCourtGroup(pool) {
     const n = pool.length;
     if (n < 8 || n > 12) return null;
@@ -1257,17 +1261,33 @@ function bestSingleCourtGroup(pool) {
     const sorted = [...pool].sort((a, b) => played(a) - played(b));
     const t = played(sorted[3]);                         // เกณฑ์จำนวนเกมของคนที่ 4
     const must = sorted.filter(p => played(p) < t);      // ลงเล่นน้อยกว่าเกณฑ์ → ต้องได้ลง
-    const fill = sorted.filter(p => played(p) === t);    // กลุ่มที่เล่นเท่ากัน เลือกได้อิสระ
+    const fill = sorted.filter(p => played(p) === t);    // กลุ่มที่เล่นเท่ากัน
     const need = 4 - must.length;
     if (need <= 0 || fill.length < need) return null;
 
-    const FAM_PARTNER = PARTNER_WEIGHT, FAM_OPP = OPP_WEIGHT, RECENT_PEN = 6;
-    const fam = (a, b) => ((historyPairs[a] && historyPairs[a][b]) || 0) * FAM_PARTNER + ((opponentHistory[a] && opponentHistory[a][b]) || 0) * FAM_OPP;
+    const F = fill.filter(p => !justPlayed(p));          // พักมาแล้ว
+    const J = fill.filter(p => justPlayed(p));           // เพิ่งลง
 
+    const fam = (a, b) => ((historyPairs[a] && historyPairs[a][b]) || 0) * PARTNER_WEIGHT + ((opponentHistory[a] && opponentHistory[a][b]) || 0) * OPP_WEIGHT;
+    const met = (a, b) => ((historyPairs[a] && historyPairs[a][b]) || 0) + ((opponentHistory[a] && opponentHistory[a][b]) || 0) > 0;
+    const allMet = set => set.every((x, i) => set.every((y, j) => j <= i || met(x, y)));
+
+    // กำหนดจำนวนคน "เพิ่งลง" ที่อนุญาตให้ปนเข้ามาได้
+    let minJ, maxJ;
+    if (F.length > need) { minJ = 0; maxJ = 0; }                         // มีคนพักมาแล้วเหลือเฟือ → ห้ามเอาคนเพิ่งลง
+    else if (F.length < need) { minJ = maxJ = need - F.length; }          // ไม่พอ → ต้องเติมจากคนเพิ่งลง
+    else {                                                               // พอดี → ปกติใช้ F ล้วน
+        minJ = 0; maxJ = 0;
+        if (J.length > 0 && allMet([...must, ...F])) maxJ = Math.min(2, J.length); // กลุ่มปิด → สลับได้ ≤ 2
+    }
+
+    const RECENT_PEN = 6;
     let best = Infinity, bestSets = [];
     const pick = [];
     (function rec(start) {
         if (pick.length === need) {
+            const jc = pick.filter(p => J.includes(p)).length;
+            if (jc < minJ || jc > maxJ) return;
             const set = [...must, ...pick];
             let cost = 0;
             for (let i = 0; i < 4; i++) {
