@@ -376,6 +376,28 @@
     </div>
 </div>
 
+<div id="swapPlayerModal" class="modal-overlay" style="z-index: 1200;">
+    <div class="modal-box" style="max-width: 420px;">
+        <div style="margin-bottom:15px; border-bottom: 2px solid var(--light); padding-bottom: 10px;">
+            <h3 style="margin:0; color:var(--dark); font-size: 18px;">👥 เปลี่ยนผู้เล่นในคอร์ท</h3>
+            <div id="swapCourtName" style="font-size:13px; color:#64748b; margin-top:4px;"></div>
+        </div>
+        <div class="form-group">
+            <label>1. คนที่จะออกจากคอร์ท:</label>
+            <select id="swapOutSelect"></select>
+        </div>
+        <div class="form-group">
+            <label>2. คนที่จะลงแทน:</label>
+            <select id="swapInSelect"></select>
+        </div>
+        <p style="font-size:12px; color:#64748b; margin:0;">• เลือกคนจากคิว: คนที่ออกจะไปนั่งแทนที่เดิมของคนที่ลงแทน<br>• เลือกคนจากคอร์ทอื่น: ทั้งสองคนจะสลับที่กัน<br>• คะแนนปัจจุบันและเวลาจะไม่ถูกรีเซ็ต</p>
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+            <button class="btn-secondary" onclick="closeSwapPlayer()" style="background: #cbd5e1; color: #334155; width: auto; margin: 0; padding: 10px 20px;">ยกเลิก</button>
+            <button class="btn-success" onclick="confirmSwapPlayer()" style="width: auto; margin: 0; padding: 10px 20px;">✅ ยืนยันเปลี่ยนคน</button>
+        </div>
+    </div>
+</div>
+
 <div id="midGameSettingsModal" class="modal-overlay" style="z-index: 1200;">
     <div class="modal-box" style="max-width: 400px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom: 2px solid var(--light); padding-bottom: 10px;">
@@ -1906,6 +1928,80 @@ function generateAllValidTeams(excludeList) {
         rePairCourtMatch(courtIndex, true);
     }
 
+    // --- เปลี่ยนผู้เล่นในคอร์ท (สลับกับคนในคิว หรือสลับกับคนในอีกคอร์ท) ---
+    let swapCtx = null;
+    window.openSwapPlayer = function(ci) {
+        const c = courts[ci];
+        if (!c || c.isPaused || !c.teamA || !c.teamB) return alert('คอร์ทนี้ยังไม่มีผู้เล่นในสนามครับ');
+        if (c.isGameOver) return alert('แมตช์นี้จบแล้ว กรุณากด "สุ่มดึงคู่ลงสนาม" หรือ "ย้อนกลับ" ก่อนครับ');
+
+        const outList = [c.teamA.p1, c.teamA.p2, c.teamB.p1, c.teamB.p2].filter(Boolean);
+        const waiting = [...mainQueue, ...eliminatedOrder.filter(p => !mainQueue.includes(p))]
+            .filter(p => !(playerStats[p] && playerStats[p].onBreak));
+        const inList = waiting.map(p => ({ name: p, label: `${getDisplayName(p)} (รอคิว)` }));
+        courts.forEach((o, j) => {
+            if (j === ci || o.isPaused || o.isGameOver || !o.teamA || !o.teamB) return;
+            [o.teamA.p1, o.teamA.p2, o.teamB.p1, o.teamB.p2].filter(Boolean).forEach(p => {
+                inList.push({ name: p, label: `${getDisplayName(p)} (กำลังเล่น ${o.name})` });
+            });
+        });
+        if (inList.length === 0) return alert('ไม่มีผู้เล่นคนอื่นให้เปลี่ยนแทนครับ (ทุกคนอยู่ในสนามหรือพักอยู่)');
+
+        swapCtx = { ci, outList, inList };
+        document.getElementById('swapCourtName').textContent = c.name;
+        document.getElementById('swapOutSelect').innerHTML = outList.map((p, k) => `<option value="${k}">${getDisplayName(p)}</option>`).join('');
+        document.getElementById('swapInSelect').innerHTML = inList.map((x, k) => `<option value="${k}">${x.label}</option>`).join('');
+        document.getElementById('swapPlayerModal').style.display = 'flex';
+    };
+    window.closeSwapPlayer = function() {
+        document.getElementById('swapPlayerModal').style.display = 'none';
+        swapCtx = null;
+    };
+    window.confirmSwapPlayer = function() {
+        if (!swapCtx) return;
+        const outName = swapCtx.outList[parseInt(document.getElementById('swapOutSelect').value)];
+        const inName = swapCtx.inList[parseInt(document.getElementById('swapInSelect').value)].name;
+        const ci = swapCtx.ci;
+        if (!outName || !inName || outName === inName) return;
+        if ((lockedPairs[outName] || lockedPairs[inName]) &&
+            !confirm('มีผู้เล่นที่ล็อคคู่อยู่ในการเปลี่ยนครั้งนี้ คู่ล็อคอาจถูกแยกกัน ต้องการดำเนินการต่อหรือไม่?')) return;
+        applyCourtSwap(ci, outName, inName);
+        closeSwapPlayer();
+    };
+    function applyCourtSwap(ci, outName, inName) {
+        clearPreviewCache();
+        const c = courts[ci];
+        const outPos = findOnCourt(outName);
+        if (!outPos || outPos.index !== ci) return;
+        const other = findOnCourt(inName);          // อยู่คอร์ทอื่นหรือไม่ (null = อยู่ในคิว)
+        if (other && other.index === ci) return;
+        const involved = [c];
+        if (other) involved.push(other.court);
+
+        // ถอนสถิติคู่/คู่ต่อสู้ของแมตช์เดิมก่อน แล้วบันทึกใหม่หลังเปลี่ยนคน
+        involved.forEach(x => undoPartnerships(x.teamA, x.teamB));
+
+        c[outPos.side][outPos.slot] = inName;
+        if (other) {
+            other.court[other.side][other.slot] = outName;   // สลับที่กัน
+        } else {
+            // คนที่ออกไปนั่งแทนที่เดิมของคนที่ลงมา
+            const inMain = mainQueue.includes(inName), inElim = eliminatedOrder.includes(inName);
+            if (inMain) mainQueue = mainQueue.map(p => p === inName ? outName : p);
+            if (inElim) eliminatedOrder = eliminatedOrder.map(p => p === inName ? outName : p);
+            if (!inMain && !inElim) eliminatedOrder.push(outName);
+        }
+
+        // ทีมแชมป์ที่มีคนถูกเปลี่ยน ไม่นับเป็นทีมเดิมอีกต่อไป
+        involved.forEach(x => {
+            if (x.currentChamp && [x.currentChamp.p1, x.currentChamp.p2].some(p => p === outName || p === inName)) x.currentChamp = null;
+        });
+
+        involved.forEach(x => recordPartnerships(x.teamA, x.teamB));
+        renderAll();
+        saveData();
+    }
+
     // --- ระบบหยุดพักคอร์ท (Pause Court) ---
     window.togglePauseCourt = function(courtIndex) {
         clearPreviewCache();
@@ -2738,6 +2834,7 @@ function generateAllValidTeams(excludeList) {
                                 <span style="font-size:14px; color:#64748b; font-weight:bold;">${titleText} (จบ ${targetWin} แต้ม)</span>
                                 <div style="display:flex; align-items:center; gap: 8px;">
                                     ${modeSelectHtml}
+                                    <button class="btn-repair protected-btn" onclick="openSwapPlayer(${i})">👥 เปลี่ยนคน</button>
                                     <button class="btn-repair protected-btn" onclick="rePairCourtMatch(${i}, false)">🔄 จัดใหม่</button>
                                     <button class="btn-pause protected-btn" onclick="togglePauseCourt(${i})">⏸️ พักคอร์ท</button>
                                     ${undoBtnHtml}
