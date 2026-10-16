@@ -839,6 +839,32 @@ const LS = (() => {
         }
     }
 
+    // ── [แก้ไข] จำนวนเกมเชิงความยุติธรรม (fairPlayed) ──
+    // เดิม: ระบบใช้ played จริงตัดสินว่า "ใครเล่นน้อยกว่า = ต้องได้ลง" ทำให้คนที่โดนพัก/หายไปนาน
+    //       พอกลับมาจะถูกดึงลงติดๆ กันจนกว่า played จะเท่าคนอื่น
+    // ใหม่: คนที่กลับจากพักจะถูกตั้ง playedOffset ให้ fairPlayed เท่ากับคนที่เล่นน้อยสุดในตอนนั้น
+    //       (played จริงที่แสดงในตารางสถิติไม่ถูกแก้ไข) จึงกลับเข้าหมุนเวียนปกติ ไม่ต้องไล่ให้ทัน
+    function fairPlayed(p) {
+        const st = playerStats[p];
+        return st ? ((st.played || 0) + (st.playedOffset || 0)) : 0;
+    }
+    function syncReturnFairness(name) {
+        const st = playerStats[name];
+        if (!st) return;
+        let others = players.filter(p => p !== name && playerStats[p] && !playerStats[p].onBreak);
+        if (others.length === 0) return;
+        // กลับจากพัก (นานหรือไม่นานก็ตาม) → ต้องได้ลงในแมตช์ถัดไปก่อนใคร "1 ครั้ง"
+        //  - fairPlayed = ต่ำกว่าคนที่เล่นน้อยสุด 1 เกม → ถูกจัดเป็นกลุ่ม "ต้องได้ลง" ก่อน
+        //  - พอลงเล่น 1 เกม fairPlayed จะเท่าคนที่เล่นน้อยสุดพอดี → กลับเข้าคิวปกติ ไม่ถูกดึงซ้ำ
+        let minFair = Math.min(...others.map(fairPlayed));
+        st.playedOffset = (minFair - 1) - (st.played || 0);
+        //  - waitingRounds สูงกว่าทุกคน → ผ่าน Fairness Gate เป็น mandatory ใน selectTeam
+        let maxWait = Math.max(0, ...others.map(p => playerStats[p].waitingRounds || 0));
+        st.waitingRounds = Math.max(st.waitingRounds || 0, maxWait + 1);
+        //  - ไม่ถูกนับว่า "เพิ่งลง/เพิ่งแพ้" เพื่อไม่ให้โดนกันออกจากรอบถัดไป
+        if ((st.lastBenchTime || 0) > globalMatchCounter) st.lastBenchTime = globalMatchCounter;
+    }
+
     function getAvailablePlayers(excludeList) {
         let pool = [];
         for (let p of mainQueue) { if (!excludeList.includes(p) && !(playerStats[p] && playerStats[p].onBreak)) pool.push(p); }
@@ -861,9 +887,7 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
             let aBench = playerStats[a] ? (playerStats[a].lastBenchTime || 0) : 0;
             let bBench = playerStats[b] ? (playerStats[b].lastBenchTime || 0) : 0;
             if (aBench !== bBench) return aBench - bBench;
-            let aPlayed = playerStats[a] ? (playerStats[a].played || 0) : 0;
-            let bPlayed = playerStats[b] ? (playerStats[b].played || 0) : 0;
-            return aPlayed - bPlayed;
+            return fairPlayed(a) - fairPlayed(b);
         });
     }
 
@@ -1278,7 +1302,7 @@ function bestSingleCourtGroup(pool) {
     if (n < 8 || n > 12) return null;
     if (pool.some(p => lockedPairs[p])) return null; // มีคู่ล็อค → ใช้ตรรกะเดิม
 
-    const played = p => (playerStats[p] && playerStats[p].played) || 0;
+    const played = p => fairPlayed(p); // [แก้ไข] ใช้ fairPlayed ไม่ให้คนกลับจากพักถูกดึงซ้ำเพื่อไล่ให้ทัน
     const justPlayed = p => !!playerStats[p] && (playerStats[p].waitingRounds || 0) === 0 && played(p) > 0;
     const sorted = [...pool].sort((a, b) => played(a) - played(b));
     const t = played(sorted[3]);                         // เกณฑ์จำนวนเกมของคนที่ 4
@@ -2449,7 +2473,7 @@ function generateAllValidTeams(excludeList) {
         let cands = nonLocked.length > 0 ? nonLocked : avail;
         if (cands.length === 0) return null;
         const wr = p => (playerStats[p] && playerStats[p].waitingRounds) || 0;
-        const pl = p => (playerStats[p] && playerStats[p].played) || 0;
+        const pl = p => fairPlayed(p);
         const hist = p => mate ? ((historyPairs[mate] && historyPairs[mate][p]) || 0) : 0;
         return shuffleArray(cands).sort((a, b) => (wr(b) - wr(a)) || (hist(a) - hist(b)) || (pl(a) - pl(b)))[0];
     }
@@ -2512,6 +2536,7 @@ function generateAllValidTeams(excludeList) {
 
         if(!playerStats[name]) playerStats[name] = {};
         playerStats[name].onBreak = !playerStats[name].onBreak;
+        if (!playerStats[name].onBreak) syncReturnFairness(name); // กลับจากพัก → ไม่ต้องไล่เกมให้ทันคนอื่น
         
         let statusTxt = playerStats[name].onBreak ? "กำลังนั่งพัก 🛌" : "กลับเข้าคิวแล้ว 🟢";
         alert(`อัปเดตสถานะ: ${name} ${statusTxt}`);
