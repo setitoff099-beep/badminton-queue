@@ -848,6 +848,21 @@ const LS = (() => {
         const st = playerStats[p];
         return st ? ((st.played || 0) + (st.playedOffset || 0)) : 0;
     }
+    // ── [แก้ไข] จำกัดช่องว่างจำนวนเกม (ใช้กับทุกกรณี: พัก / สลับตัว / ถูกข้ามนาน) ──
+    // ใครที่ fairPlayed ต่ำกว่า "ค่ากลางของผู้เล่นที่ยังเล่นอยู่" เกิน 1 เกม → ยกขึ้นมาที่ (ค่ากลาง - 1)
+    // ผลคือเขายังได้ลงก่อนใคร "1 ครั้ง" แต่ไม่ถูกดึงซ้ำๆ เพื่อไล่ให้ทัน (เก็บเป็น playedOffset ถาวร)
+    // played จริงที่แสดงในตารางสถิติไม่ถูกแก้
+    function normalizeFairness() {
+        const active = players.filter(p => playerStats[p] && !playerStats[p].onBreak);
+        if (active.length < 3) return;
+        const vals = active.map(fairPlayed).sort((a, b) => a - b);
+        const median = vals[Math.floor((vals.length - 1) / 2)];
+        const floorVal = median - 1;
+        active.forEach(p => {
+            const f = fairPlayed(p);
+            if (f < floorVal) playerStats[p].playedOffset = (playerStats[p].playedOffset || 0) + (floorVal - f);
+        });
+    }
     function syncReturnFairness(name) {
         const st = playerStats[name];
         if (!st) return;
@@ -2182,6 +2197,7 @@ function generateAllValidTeams(excludeList) {
         loserArr.forEach(p => { if (playerStats[p]) playerStats[p].lastBenchTime = globalMatchCounter + 1; pushToEliminated(p); });
 
         [...winnerArr, ...loserArr].forEach(p => playerStats[p].played++);
+        normalizeFairness(); // จำกัดช่องว่างเกม ไม่ให้คนที่ตามหลังถูกดึงซ้ำเพื่อไล่ให้ทัน
         winnerArr.forEach(p => playerStats[p].wins++);
         loserArr.forEach(p => playerStats[p].losses++);
 
@@ -2561,17 +2577,18 @@ function generateAllValidTeams(excludeList) {
 
         // snapshot → จำลอง → คืนค่าเดิมเสมอ
         let snap = {};
-        combined.forEach(p => { snap[p] = { played: playerStats[p].played, waitingRounds: playerStats[p].waitingRounds }; });
+        combined.forEach(p => { snap[p] = { played: playerStats[p].played, waitingRounds: playerStats[p].waitingRounds, playedOffset: playerStats[p].playedOffset }; });
         try {
             if (playing.length) {
                 combined.forEach(p => {
                     if (playing.includes(p)) { playerStats[p].played = (playerStats[p].played || 0) + 1; playerStats[p].waitingRounds = 0; }
                     else playerStats[p].waitingRounds = (playerStats[p].waitingRounds || 0) + 1;
                 });
+                normalizeFairness(); // ให้พรีวิวใช้กฎเดียวกับตอนจบเกมจริง
             }
             return bestSingleCourtGroup(combined);
         } finally {
-            combined.forEach(p => { playerStats[p].played = snap[p].played; playerStats[p].waitingRounds = snap[p].waitingRounds; });
+            combined.forEach(p => { playerStats[p].played = snap[p].played; playerStats[p].waitingRounds = snap[p].waitingRounds; playerStats[p].playedOffset = snap[p].playedOffset; });
         }
     }
 
