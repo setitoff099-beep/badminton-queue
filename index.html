@@ -925,6 +925,15 @@ function selectTeam(excludeList, reqCount = 2, vsTeam = []) {
     //     - restedPool ไม่พอ: เติมคนเพิ่งลงที่ "พักนานสุดในกลุ่มเพิ่งลง" ทีละคนจนครบ (Minimum Necessary)
     //     - คนทั้งหมดไม่ถึง reqCount: slice = validRawPool ทั้งหมด (Availability floor เท่าเดิม)
     let pool = validRawPool.slice(0, Math.max(reqCount, restedPool.length));
+    // [แก้ไข — แชมป์หลายสมัยตอนคนน้อย] ผู้ท้าชิงถูกบังคับให้เป็นคู่ที่พักอยู่ (เช่น 6 คน 1 สนาม, 10 คน 2 สนาม)
+    // ถ้าคู่นั้นเพิ่งจับกันไป ให้ดึงคนเพิ่งแพ้ที่พักนานสุดเพิ่ม 1 คน เพื่อให้เลือกคู่ใหม่ได้
+    // ทำงานเฉพาะตอนหาผู้ท้าชิง (vsTeam มีค่า) ไม่แตะคู่ล็อค และไม่กระทบกรณีอื่น
+    if (reqCount === 2 && vsTeam.length > 0 && pool.length === 2 &&
+        validRawPool.length > 2 &&
+        !lockedPairs[pool[0]] && !lockedPairs[pool[1]] &&
+        isRecentPair(pool[0], pool[1])) {
+        pool = validRawPool.slice(0, 3);
+    }
 
 
     if (reqCount === 1) return pool.length > 0 ? pool.slice(0, 1) : validRawPool.slice(0, 1);
